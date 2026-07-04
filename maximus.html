@@ -247,6 +247,7 @@ function newRun(name){
     equip: Object.assign({}, EQUIP_ZERO),
     weapon: 'gladius', classe: 'bouclier', hue: 210, gold: 0,
     ulti: false, flawless: false,
+    dura: {casque: 40, cuirasse: 40},   // durabilité du casque et de la cuirasse
     seed: Math.floor(Math.random()*1e9),
   };
 }
@@ -505,6 +506,19 @@ class Fighter {
       // les armes perforantes ignorent une partie de l'armure
       let dmg = Math.max(1, Math.round(raw*this.dmgTakenMult - this.armorFlat*(1-(wf.pierce||0))));
       this.hp -= dmg; this.tookDamage=true;
+      // usure de l'équipement porté (l'élite niv 5+ s'use 25 % moins vite)
+      if(this.player && run && run.dura){
+        const usure = lv => raw * (lv>=5 ? .6 : .8);
+        if(atkType==='high' && run.equip.casque>0 && run.dura.casque>0){
+          run.dura.casque -= usure(run.equip.casque);
+          if(run.dura.casque<=0){ run.dura.casque=0;
+            addFloater(this.x, GROUND-235+this.y, 'CASQUE BRISÉ !', '#ff8c42'); sfx.shatter(); }
+        } else if(atkType!=='high' && run.equip.cuirasse>0 && run.dura.cuirasse>0){
+          run.dura.cuirasse -= usure(run.equip.cuirasse);
+          if(run.dura.cuirasse<=0){ run.dura.cuirasse=0;
+            addFloater(this.x, GROUND-235+this.y, 'CUIRASSE BRISÉE !', '#ff8c42'); sfx.shatter(); }
+        }
+      }
       this.flash=1; this.state='hit'; this.t=0; this.blocking=false; this.crouch=false;
       this.x -= this.facing*18;
       const zone = atkType==='high'?'TÊTE':(atkType==='low'?'JAMBES':'CORPS');
@@ -1207,8 +1221,8 @@ function playerOpts(){
     hp: 100+s.vie, stam: 100+s.endurance,
     speed: 230*(1+q.vitesse*.07),
     dmgMult: 1 + q.arme*.12 + (q.force||0)*.06,
-    armorFlat: s.armure + q.cuirasse*2,
-    dmgTakenMult: Math.max(.6, 1 - q.casque*.04),
+    armorFlat: s.armure + (run.dura && run.dura.cuirasse>0 ? q.cuirasse : 0)*2,
+    dmgTakenMult: Math.max(.6, 1 - (run.dura && run.dura.casque>0 ? q.casque : 0)*.04),
     shieldMax: 70 + (q.bouclier||0)*20,
     jumpV: [645,560,505][wgt],   // léger = saut haut · bouclier = moyen · lourd = moyen/petit
     jumpCost: [7,8,10][wgt],     // sauter fatigue, surtout les lourds
@@ -1229,6 +1243,7 @@ function migrateRun(r){
   if(r.gold===undefined) r.gold=0;
   if(r.ulti===undefined) r.ulti=false;
   if(r.flawless===undefined) r.flawless=false;
+  if(!r.dura) r.dura={casque:duraMax(r.equip.casque||0), cuirasse:duraMax(r.equip.cuirasse||0)};
   if(!r.seed) r.seed=Math.floor(Math.random()*1e9);
   if(!TREES[r.classe][r.weapon]) r.weapon=Object.keys(TREES[r.classe])[0];
   return r;
@@ -1243,10 +1258,21 @@ function pushScore(r){
 }
 /* ============ BOUTIQUE (or) ============ */
 function equipPrice(k){ return 50 + run.equip[k]*40; }
+/* durabilité : le casque s'use sur les coups à la tête, la cuirasse sur les coups au corps.
+   À 0, l'objet est brisé (bonus perdu, visuel retiré). Réparation à la boutique, niveau conservé. */
+function duraMax(lv){ return 40 + lv*15; }
+function repairPrice(k){ return 10 + run.equip[k]*8; }
+function repairEquip(k){
+  const p=repairPrice(k);
+  if(run.gold<p || run.equip[k]<=0 || run.dura[k]>=duraMax(run.equip[k])) return;
+  run.gold-=p; run.dura[k]=duraMax(run.equip[k]);
+  sfx.pickup(); saveData.run=run; persist();
+}
 function buyEquip(k){
   const p=equipPrice(k);
   if(run.gold<p || run.equip[k]>=EQUIP_MAX) return;
   run.gold-=p; run.equip[k]++;
+  if(k==='casque'||k==='cuirasse') run.dura[k]=duraMax(run.equip[k]);   // matériel neuf
   sfx.pickup(); saveData.run=run; persist();
 }
 function gotoSelect(){
@@ -1503,7 +1529,12 @@ function drawFighter(f, t){
   const cDark='hsl('+f.hue+',55%,32%)';
   const skin='#e3b98a';
   // niveaux d'équipement visibles : joueur = achats · ennemis = généré avec leur niveau
-  const eqv = (f.player&&run) ? run.equip : (f.eqv || {casque:1, cuirasse:3, vitesse:1, bouclier:1, arme:0});
+  const eqv = (f.player&&run)
+    ? Object.assign({}, run.equip, {
+        casque: (run.dura&&run.dura.casque>0) ? run.equip.casque : 0,
+        cuirasse: (run.dura&&run.dura.cuirasse>0) ? run.equip.cuirasse : 0,
+      })
+    : (f.eqv || {casque:1, cuirasse:3, vitesse:1, bouclier:1, arme:0});
   const bob=(f.state==='walk')?Math.abs(Math.sin(f.walkT))*4:Math.sin(t*2)*1.5;
   const hy=(-128+bob)*ch - (cr?8:0);
 
@@ -2086,6 +2117,19 @@ function drawBoutique(t){
       fitText(price+' or', x+cw/2, y+94, cw-16, 15, afford?'#ffd700':'#a06a4a', true);
       if(afford) game.cards.push({x,y,w:cw,h:chh,action:()=>buyEquip(k)});
     }
+    // durabilité et réparation (casque / cuirasse possédés)
+    if((k==='casque'||k==='cuirasse') && lv>0){
+      const dm=duraMax(lv), cur=Math.max(0, run.dura[k]);
+      const brise = cur<=0;
+      bar(x+10, y+chh+6, cw-20, 7, cur/dm, brise?'#d33':'#8fd8c0', '#241a10', false);
+      if(cur<dm){
+        const rp=repairPrice(k), can=run.gold>=rp;
+        const ry=y+chh+18;
+        card(x+20, ry, cw-40, 22, can&&hover(x+20,ry,cw-40,22));
+        fitText((brise?'BRISÉ — réparer ':'réparer ')+rp+' or', x+cw/2, ry+15, cw-46, 11, brise?'#ff8c42':(can?'#8fd8c0':'#a06a4a'));
+        if(can) game.cards.push({x:x+20,y:ry,w:cw-40,h:22,action:()=>repairEquip(k)});
+      }
+    }
   });
   const bx=W/2-110, by=330;
   card(bx,by,220,46, hover(bx,by,220,46));
@@ -2262,9 +2306,11 @@ function drawStatsScreen(t){
   let y=152;
   ligne(LX,y,'Points de vie', o.hp, '#ff6b6b', s.vie?('+'+s.vie):''); y+=step;
   ligne(LX,y,'Endurance', o.stam, '#ffe97a', s.endurance?('+'+s.endurance):''); y+=step;
-  ligne(LX,y,'Armure', o.armorFlat, '#9fd8ff', q.cuirasse?('cuirasse '+q.cuirasse):''); y+=step;
+  ligne(LX,y,'Armure', o.armorFlat, '#9fd8ff',
+    q.cuirasse?('cuirasse '+q.cuirasse+(run.dura.cuirasse>0?' · '+Math.round(run.dura.cuirasse/duraMax(q.cuirasse)*100)+'%':' · BRISÉE')):''); y+=step;
   ligne(LX,y,'Dégâts', '×'+o.dmgMult.toFixed(2), '#ff9c5a', '+'+(q.arme*12+(q.force||0)*6)+'%'); y+=step;
-  ligne(LX,y,'Dégâts subis', '×'+o.dmgTakenMult.toFixed(2), '#a0d8ff', q.casque?('−'+q.casque*4+'%'):''); y+=step;
+  ligne(LX,y,'Dégâts subis', '×'+o.dmgTakenMult.toFixed(2), '#a0d8ff',
+    q.casque?('casque '+q.casque+(run.dura.casque>0?' · '+Math.round(run.dura.casque/duraMax(q.casque)*100)+'%':' · BRISÉ')):''); y+=step;
   ligne(LX,y,'Percussion', Math.round(o.stunCh*100)+'%', '#c9a2ff', 'étourdit en frappant'); y+=step;
   if(run.classe==='bouclier'){
     ligne(LX,y,'Riposte', Math.round(o.riposte*100)+'%', '#f5c542', 'étourdit en parant'); y+=step;

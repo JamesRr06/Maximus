@@ -208,6 +208,21 @@ eval(src + `;(${function(){
   for(let i=0;i<200;i++) spawnTrap();
   check('projectiles du public près des bords', traps.some(tr=>tr.type==='projo'));
 
+  /* ---- durabilité du casque et de la cuirasse ---- */
+  run=newRun('T'); run.equip.casque=2; run.equip.cuirasse=2;
+  run.dura={casque:duraMax(2), cuirasse:duraMax(2)};
+  run.level=1; startFight();
+  const defAvant=playerOpts().dmgTakenMult;
+  enemy.dead=false; enemy.x=player.x+40; player.facing=1; enemy.aw=WEAPONS.gladius;
+  for(let i=0;i<40 && run.dura.casque>0;i++){ player.state='idle'; player.hp=200; player.takeHit(20, enemy, 'high'); }
+  check('le casque se brise sous les coups à la tête', run.dura.casque===0);
+  check('casque brisé = bonus perdu', playerOpts().dmgTakenMult > defAvant);
+  run.gold=500; repairEquip('casque');
+  check('réparation : durabilité pleine, niveau conservé', run.dura.casque===duraMax(2) && run.equip.casque===2);
+  check('réparer coûte moins cher qu acheter', repairPrice('casque') < equipPrice('casque'));
+  for(let i=0;i<60 && run.dura.cuirasse>0;i++){ player.state='idle'; player.hp=200; player.takeHit(20, enemy, 'mid'); }
+  check('la cuirasse se brise sous les coups au corps', run.dura.cuirasse===0);
+
   /* ---- boss : compétences spéciales ---- */
   run=newRun('T'); run.level=10; startFight();
   enemy.spT=0.01;
