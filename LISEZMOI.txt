@@ -1,0 +1,32 @@
+MAXIMUS — roguelike de gladiature (40 combats)
+==============================================
+
+JOUER
+-----
+Maximus.exe (Windows) : double-clic, fenêtre dédiée, code protégé, musique incluse.
+maximus.html : version web (Chrome/Edge/Firefox), un seul fichier à partager.
+
+COMMANDES (personnalisables dans Options)
+-----------------------------------------
+Clic gauche ....... attaquer (debout = corps · en saut = tête · accroupi = jambes)
+Clic droit ........ défense de classe (bouclier / garde à l'arme / main gauche)
+Flèches ou Q/D .... se déplacer          Espace ......... sauter (coûte de l'endurance)
+E ................. esquive (rapide)     R .............. roulade (invincible, 1 s de récup. commune)
+F ................. lancer l'arme (lance, couteau, hache)
+X ................. ULTI (rechargée à chaque boss, un seul usage)
+A ................. s'accroupir          Échap / P ...... pause
+
+SYSTÈMES
+--------
+3 classes (Murmillo, Secutor lourd, Dimachaerus) avec arbres d'armes propres,
+DPS équilibrés par palier et effets d'état distincts (saignement, perce-armure,
+enchevêtrement, fente d'armure, étourdissement). Perks par classe après chaque
+victoire, or et boutique de matériel, ulti de classe, contre sur parade ou
+roulade parfaite, victoire parfaite = duel à deux (dégâts ennemis -33 %),
+arènes évolutives avec pièges (piques, flaques, lions, et tomates/pierres du
+public près des bords aux niveaux 31-40), IA adaptative qui lance ses armes.
+
+DÉVELOPPEMENT
+-------------
+node tests.js .......... lance les 82 tests de régression sur maximus.html
+tests.js accepte un chemin en argument pour tester un autre build.
