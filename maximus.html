@@ -2136,9 +2136,9 @@ function drawPause(t){
 }
 function drawOptions(t){
   drawArena(t); overlay(.68); game.cards=[];
-  title('OPTIONS', 62, 36, '#f5c542');
+  title('OPTIONS', 52, 34, '#f5c542');
   // plein écran
-  const fx=W-204, fy=40, fw=180, fh=34;
+  const fx=W-204, fy=30, fw=180, fh=34;
   card(fx,fy,fw,fh, hover(fx,fy,fw,fh));
   title2(document.fullscreenElement?'QUITTER PLEIN ÉCRAN':'⛶ PLEIN ÉCRAN', fx+fw/2, fy+22, 12, '#9fd8ff');
   game.cards.push({x:fx,y:fy,w:fw,h:fh,action:()=>{
@@ -2147,66 +2147,68 @@ function drawOptions(t){
       else document.documentElement.requestFullscreen();
     }catch(e){}
   }});
+  const labX=W/2-190;   // colonne des libellés, bien séparée des contrôles
+  const ctlX=W/2-150;   // colonne des contrôles
   // ---- volume ----
-  ctx.textAlign='right'; ctx.font='16px Georgia'; ctx.fillStyle='#fff';
-  ctx.fillText('Volume', W/2-160, 118);
-  const vbx=W/2-130, vby=102, vbw=220;
-  card(vbx-36,vby,28,26, hover(vbx-36,vby,28,26)); title2('−', vbx-22, vby+19, 16, '#fff');
-  game.cards.push({x:vbx-36,y:vby,w:28,h:26,action:()=>{saveData.volume=Math.max(0,Math.round((saveData.volume-0.1)*10)/10); persist(); sfx.pick();}});
-  card(vbx+vbw+8,vby,28,26, hover(vbx+vbw+8,vby,28,26)); title2('+', vbx+vbw+22, vby+19, 16, '#fff');
-  game.cards.push({x:vbx+vbw+8,y:vby,w:28,h:26,action:()=>{saveData.volume=Math.min(1,Math.round((saveData.volume+0.1)*10)/10); persist(); sfx.pick();}});
-  bar(vbx,vby+6,vbw,14, saveData.volume, '#e9c34a', '#3a3010', false);
-  game.cards.push({x:vbx,y:vby,w:vbw,h:26,action:()=>{
-    const r=(game.mouse.x-vbx)/vbw;
+  ctx.textAlign='right'; ctx.font='16px Georgia'; ctx.fillStyle='#fff'; ctx.shadowBlur=0;
+  ctx.fillText('Volume', labX, 108);
+  const vby=90, vbw=220, bx0=ctlX+36;
+  card(ctlX,vby,28,26, hover(ctlX,vby,28,26)); title2('−', ctlX+14, vby+19, 16, '#fff');
+  game.cards.push({x:ctlX,y:vby,w:28,h:26,action:()=>{saveData.volume=Math.max(0,Math.round((saveData.volume-0.1)*10)/10); persist(); sfx.pick();}});
+  bar(bx0, vby+6, vbw, 14, saveData.volume, '#e9c34a', '#3a3010', false);
+  game.cards.push({x:bx0,y:vby,w:vbw,h:26,action:()=>{
+    const r=(game.mouse.x-bx0)/vbw;
     saveData.volume=Math.max(0,Math.min(1,Math.round(r*10)/10)); persist(); sfx.pick();
   }});
-  title2(Math.round(saveData.volume*100)+'%', vbx+vbw+68, vby+19, 14, '#ffe9a0');
+  card(bx0+vbw+8,vby,28,26, hover(bx0+vbw+8,vby,28,26)); title2('+', bx0+vbw+22, vby+19, 16, '#fff');
+  game.cards.push({x:bx0+vbw+8,y:vby,w:28,h:26,action:()=>{saveData.volume=Math.min(1,Math.round((saveData.volume+0.1)*10)/10); persist(); sfx.pick();}});
+  title2(Math.round(saveData.volume*100)+'%', bx0+vbw+72, vby+19, 14, '#ffe9a0');
   // ---- graphismes ----
   ctx.textAlign='right'; ctx.fillStyle='#fff'; ctx.font='16px Georgia';
-  ctx.fillText('Graphismes', W/2-160, 162);
+  ctx.fillText('Graphismes', labX, 152);
   ['low','medium','high'].forEach((gq,i)=>{
-    const gx=W/2-130+i*92, gy=144, gw=84;
+    const gx=ctlX+i*92, gy=134, gw=84;
     const sel=saveData.gfx===gq;
     card(gx,gy,gw,28, sel||hover(gx,gy,gw,28));
     title2(GFXP[gq].nom, gx+gw/2, gy+19, 13, sel?'#7ee787':'#ddd');
     game.cards.push({x:gx,y:gy,w:gw,h:28,action:()=>{saveData.gfx=gq; persist();}});
   });
+  title2('bas = ni particules ni foule · moyen = allégé · élevé = tous les effets', ctlX+vbw/2+60, 152, 11, '#999');
   // ---- musique de menu ----
   ctx.textAlign='right'; ctx.fillStyle='#fff'; ctx.font='16px Georgia';
-  ctx.fillText('Musique menu', W/2-160, 196);
-  const mx=W/2-130, my=179;
-  card(mx,my,84,24, saveData.music||hover(mx,my,84,24));
-  title2(saveData.music?'OUI':'NON', mx+42, my+17, 13, saveData.music?'#7ee787':'#ff9c9c');
-  game.cards.push({x:mx,y:my,w:84,h:24,action:()=>{saveData.music=!saveData.music; persist(); updateMusic();}});
-  title('BAS : ni particules ni foule · MOYEN : allégé · ÉLEVÉ : tous les effets', 214, 12, '#999');
+  ctx.fillText('Musique menu', labX, 192);
+  const my=174;
+  card(ctlX,my,84,28, saveData.music||hover(ctlX,my,84,28));
+  title2(saveData.music?'OUI':'NON', ctlX+42, my+19, 13, saveData.music?'#7ee787':'#ff9c9c');
+  game.cards.push({x:ctlX,y:my,w:84,h:28,action:()=>{saveData.music=!saveData.music; persist(); updateMusic();}});
   // ---- touches ----
-  title('Touches (clique pour modifier)', 232, 15, '#ccc');
+  title('Touches (clique pour modifier)  ·  Attaque : clic gauche  ·  Parade / main gauche : clic droit', 236, 14, '#ccc');
   const acts=Object.keys(KEY_LABELS);
   acts.forEach((a,i)=>{
     const col=i%2, row=Math.floor(i/2);
-    const lx = col===0 ? W/2-290 : W/2+30;
-    const y=250+row*40;
+    const lx = col===0 ? W/2-300 : W/2+40;
+    const y=256+row*34;
     ctx.textAlign='left'; ctx.fillStyle='#fff'; ctx.font='14px Georgia';
-    ctx.fillText(KEY_LABELS[a], lx, y+19);
+    ctx.fillText(KEY_LABELS[a], lx, y+18);
     const kx=lx+150, kw=112;
     const capturing=game.rebind===a;
-    card(kx,y,kw,28, capturing||hover(kx,y,kw,28));
-    title2(capturing?'appuie...':bindLabel(a), kx+kw/2, y+19, capturing?11:12, capturing?'#7ee787':'#ffe9a0');
-    game.cards.push({x:kx,y,w:kw,h:28,action:()=>{game.rebind=a;}});
+    card(kx,y,kw,26, capturing||hover(kx,y,kw,26));
+    title2(capturing?'appuie...':bindLabel(a), kx+kw/2, y+18, capturing?11:12, capturing?'#7ee787':'#ffe9a0');
+    game.cards.push({x:kx,y,w:kw,h:26,action:()=>{game.rebind=a;}});
   });
-  title('Attaque : clic gauche · Parade / main gauche : clic droit (souris)', 428, 12, '#999');
   // ---- boutons ----
-  const by2=448;
+  const by2=462;
   const bx1=W/2-345;
-  card(bx1,by2,220,42, hover(bx1,by2,220,42)); title2('TUTORIEL', bx1+110, by2+27, 15, '#9fd8ff');
-  game.cards.push({x:bx1,y:by2,w:220,h:42,action:()=>{game.screen='tutoriel';}});
+  card(bx1,by2,220,38, hover(bx1,by2,220,38)); title2('TUTORIEL', bx1+110, by2+25, 15, '#9fd8ff');
+  game.cards.push({x:bx1,y:by2,w:220,h:38,action:()=>{game.screen='tutoriel';}});
   const bx2=W/2-110;
-  card(bx2,by2,220,42, hover(bx2,by2,220,42)); title2('TOUCHES PAR DÉFAUT', bx2+110, by2+27, 13, '#ddd');
-  game.cards.push({x:bx2,y:by2,w:220,h:42,action:()=>{for(const k in DEFAULT_KEYS) binds[k]=DEFAULT_KEYS[k].slice(); saveData.keys=binds; persist();}});
+  card(bx2,by2,220,38, hover(bx2,by2,220,38)); title2('TOUCHES PAR DÉFAUT', bx2+110, by2+25, 13, '#ddd');
+  game.cards.push({x:bx2,y:by2,w:220,h:38,action:()=>{for(const k in DEFAULT_KEYS) binds[k]=DEFAULT_KEYS[k].slice(); saveData.keys=binds; persist();}});
   const bx3=W/2+125;
-  card(bx3,by2,220,42, hover(bx3,by2,220,42)); title2('RETOUR', bx3+110, by2+27, 15, '#fff');
-  game.cards.push({x:bx3,y:by2,w:220,h:42,action:optionsBack});
+  card(bx3,by2,220,38, hover(bx3,by2,220,38)); title2('RETOUR', bx3+110, by2+25, 15, '#fff');
+  game.cards.push({x:bx3,y:by2,w:220,h:38,action:optionsBack});
 }
+
 function drawTutoriel(t){
   drawArena(t); overlay(.72); game.cards=[];
   title('TUTORIEL', 60, 34, '#f5c542');
