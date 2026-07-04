@@ -2241,44 +2241,70 @@ function statsBtn(from){
   game.cards.push({x:bx,y:by,w:bw,h:bh,action:()=>{game.statsFrom=from; game.screen='stats';}});
 }
 function drawStatsScreen(t){
-  drawArena(t); overlay(.72); game.cards=[];
+  drawArena(t); overlay(.74); game.cards=[];
   const o=playerOpts(), s=run.stats, q=run.equip;
-  title('COMPÉTENCES DE '+run.name.toUpperCase(), 60, 28, '#f5c542');
-  title(CLASSES[run.classe].nom+' — '+CLASSES[run.classe].sub+'  ·  Or : '+run.gold, 92, 15, '#ffd700');
-  const L=[
-    ['Points de vie max', o.hp+'  (base 100 + '+s.vie+')'],
-    ['Endurance max', o.stam+'  (base 100 + '+s.endurance+')'],
-    ['Armure', o.armorFlat+'  (stat '+s.armure+' + cuirasse '+q.cuirasse*2+')'],
-    ['Dégâts infligés', '×'+o.dmgMult.toFixed(2)+'  (arme +'+q.arme*12+'% · force +'+(q.force||0)*6+'%)'],
-    ['Dégâts subis', '×'+o.dmgTakenMult.toFixed(2)+'  (casque niv '+q.casque+')'],
-    ['Vitesse de déplacement', Math.round(o.speed)+'  (sandales niv '+q.vitesse+')'],
-    ['Vitesse d’attaque', '×'+(1/o.atkSpd).toFixed(2)+'  (célérité niv '+(q.celerite||0)+')'],
-    ['Saut', 'hauteur '+o.jumpV+' · coût '+o.jumpCost+' end.'],
-    ['Roulade / Esquive', 'coût '+o.rollCost.toFixed(1)+' / '+o.dashCost.toFixed(1)+' end. · portée ×'+o.rollBoost.toFixed(2)],
-  ];
-  if(run.classe==='bouclier'){
-    L.push(['Bouclier', 'solidité '+o.shieldMax+' (bouclier niv '+(q.bouclier||0)+')']);
-    L.push(['Riposte', (o.riposte*100).toFixed(0)+'% d’étourdir en parant']);
-  }
-  L.push(['Percussion', ((o.stunCh)*100).toFixed(0)+'% d’étourdir en frappant']);
-  const u=ULTIS[run.classe]||ULTIS.bouclier;
-  L.push(['Ulti — '+u.nom, (run.ulti?'PRÊTE — ':'à recharger sur un boss — ')+u.desc]);
-  L.forEach((l,i)=>{
-    const y=128+i*28;
-    ctx.textAlign='right'; ctx.font='bold 15px Georgia'; ctx.fillStyle='#ffe9a0';
+  title('COMPÉTENCES DE '+run.name.toUpperCase(), 54, 28, '#f5c542');
+  title(CLASSES[run.classe].nom+' · '+CLASSES[run.classe].sub, 84, 14, '#ddd');
+  title2('◉ '+run.gold+' or', W-120, 54, 18, '#ffd700');
+  // une ligne de stat : libellé coloré, GROSSE valeur, détail discret
+  const ligne=(x,y,label,val,col,det)=>{
     ctx.shadowColor='#000'; ctx.shadowBlur=GFX().shadows?4:0;
-    ctx.fillText(l[0], W/2-20, y);
-    ctx.textAlign='left'; ctx.font='14px Georgia'; ctx.fillStyle='#ddd';
-    ctx.fillText(l[1], W/2+10, y);
+    ctx.textAlign='left'; ctx.font='bold 14px Georgia'; ctx.fillStyle=col;
+    ctx.fillText(label, x, y);
+    ctx.textAlign='right'; ctx.font='bold 19px Georgia'; ctx.fillStyle='#fff';
+    ctx.fillText(String(val), x+300, y);
+    if(det){ ctx.textAlign='left'; ctx.font='11px Georgia'; ctx.fillStyle='#988e7a'; ctx.fillText(det, x+312, y-1); }
     ctx.shadowBlur=0;
-  });
+  };
+  const LX=90, RX=520, step=33;
+  // ---- colonne COMBAT ----
+  title2('⚔ COMBAT', LX+80, 122, 15, '#ff6b6b');
+  let y=152;
+  ligne(LX,y,'Points de vie', o.hp, '#ff6b6b', s.vie?('+'+s.vie):''); y+=step;
+  ligne(LX,y,'Endurance', o.stam, '#ffe97a', s.endurance?('+'+s.endurance):''); y+=step;
+  ligne(LX,y,'Armure', o.armorFlat, '#9fd8ff', q.cuirasse?('cuirasse '+q.cuirasse):''); y+=step;
+  ligne(LX,y,'Dégâts', '×'+o.dmgMult.toFixed(2), '#ff9c5a', '+'+(q.arme*12+(q.force||0)*6)+'%'); y+=step;
+  ligne(LX,y,'Dégâts subis', '×'+o.dmgTakenMult.toFixed(2), '#a0d8ff', q.casque?('−'+q.casque*4+'%'):''); y+=step;
+  ligne(LX,y,'Percussion', Math.round(o.stunCh*100)+'%', '#c9a2ff', 'étourdit en frappant'); y+=step;
+  if(run.classe==='bouclier'){
+    ligne(LX,y,'Riposte', Math.round(o.riposte*100)+'%', '#f5c542', 'étourdit en parant'); y+=step;
+  }
+  // ---- colonne MOBILITÉ ----
+  title2('➤ MOBILITÉ', RX+80, 122, 15, '#7ee787');
+  let y2=152;
+  ligne(RX,y2,'Vitesse', Math.round(o.speed), '#7ee787', q.vitesse?('+'+q.vitesse*7+'%'):''); y2+=step;
+  ligne(RX,y2,'Vitesse d’attaque', '×'+(1/o.atkSpd).toFixed(2), '#ffd97a', (q.celerite||0)?('célérité '+q.celerite):''); y2+=step;
+  ligne(RX,y2,'Saut', o.jumpV, '#8fd8c0', o.jumpCost+' end.'); y2+=step;
+  ligne(RX,y2,'Roulade', o.rollCost.toFixed(0)+' end.', '#9fd8ff', 'portée ×'+o.rollBoost.toFixed(2)); y2+=step;
+  ligne(RX,y2,'Esquive', o.dashCost.toFixed(0)+' end.', '#9fd8ff', '1 s de récup.'); y2+=step;
+  if(run.classe==='bouclier'){
+    ligne(RX,y2,'Bouclier', o.shieldMax, '#c9a86a', 'solidité'); y2+=step;
+  }
+  // ---- bandeau ULTI ----
+  const u=ULTIS[run.classe]||ULTIS.bouclier;
+  const uy=Math.max(y,y2)+14;
+  card(W/2-330, uy-22, 660, 42, run.ulti);
+  title2('★ '+u.nom.toUpperCase()+' — '+(run.ulti?'PRÊTE ('+bindLabel('ulti')+')':'à recharger sur un boss'), W/2, uy, 15, run.ulti?'#7ee787':'#998e7a');
+  title2(u.desc, W/2, uy+16, 11, '#bbb');
+  // ---- pastilles d'équipement ----
+  const cols={casque:'#a0d8ff', cuirasse:'#9fd8ff', bouclier:'#c9a86a', arme:'#ff9c5a', vitesse:'#7ee787', esquive:'#8fd8c0', celerite:'#ffd97a', percussion:'#c9a2ff', riposte:'#f5c542', force:'#ff6b6b'};
   const owned=EQKEYS.filter(k=>q[k]>0);
-  title('Niveaux :  '+(owned.length? owned.map(k=>EQUIP[k].nom+' '+q[k]).join(' · ') : 'aucun équipement'), 128+L.length*28+8, 13, '#9fd8ff');
+  let px=W/2 - owned.length*46;
+  const py=uy+44;
+  for(const k of owned){
+    ctx.fillStyle='rgba(255,255,255,.08)';
+    ctx.strokeStyle=cols[k]||'#ddd'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.roundRect(px,py,88,24,12); ctx.fill(); ctx.stroke();
+    title2(EQUIP[k].nom+' '+q[k], px+44, py+16, 11, cols[k]||'#ddd');
+    px+=92;
+  }
+  if(!owned.length) title('aucun équipement pour l’instant', py+14, 12, '#777');
   const bx=W/2-110, by=498;
   card(bx,by,220,36, hover(bx,by,220,36));
   title('RETOUR', by+24, 15, '#fff');
   game.cards.push({x:bx,y:by,w:220,h:36,action:()=>{game.screen=game.statsFrom||'select';}});
 }
+
 function drawGameOver(t){
   drawArena(t); overlay(.7); game.cards=[];
   title('MORT DANS L’ARÈNE', 170, 52, '#d33');
