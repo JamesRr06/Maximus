@@ -390,7 +390,7 @@ class Fighter {
     this.state='attack'; this.attackPhase='recover'; this.t=0;
     this.aw=Object.assign({}, FISTS, {recover:240});
     sfx.swing();
-    addFloater(this.x, GROUND-170+this.y, tw+' jeté'+(tw==='lance'?'e':'')+' !', '#ffd7a0');
+    addFloater(this.x, GROUND-170+this.y, tw+' jeté'+(tw==='couteau'?'':'e')+' !', '#ffd7a0');
   }
   startAttack(forceType, offhand){
     if(this.busy || this.st.stun>0) return;
@@ -940,7 +940,8 @@ function updateSpears(dt){
     if(!o.dead && o.thrown && Math.abs(o.x-d.x)<34 && o.y>-12){
       o.w=o.baseW; o.thrown=false;
       spearDrops.splice(i,1);
-      addFloater(o.x, GROUND-160, 'lance récupérée !', '#7ee787');
+      const twr=d.w.throwType;
+      addFloater(o.x, GROUND-160, twr+(twr==='couteau'?' récupéré !':' récupérée !'), '#7ee787');
       sfx.pick();
     }
   }
