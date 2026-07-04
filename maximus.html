@@ -336,7 +336,8 @@ class Fighter {
     this.riposte=opts.riposte||0;     // chance d'étourdir en parant
     // classe de combat et bouclier
     this.classe=opts.classe||null;
-    this.eqv=opts.eqv||null;    // équipement visible (ennemis)
+    this.eqv=opts.eqv ? Object.assign({}, opts.eqv) : null;    // équipement visible (ennemis)
+    this.dura = this.eqv ? {casque:duraMax(this.eqv.casque||0), cuirasse:duraMax(this.eqv.cuirasse||0)} : null;
     this.aw=this.w; this.offhand=false;   // arme active de l'attaque en cours
     if(this.player){
       const hasSh = this.classe==='bouclier';
@@ -507,8 +508,8 @@ class Fighter {
       let dmg = Math.max(1, Math.round(raw*this.dmgTakenMult - this.armorFlat*(1-(wf.pierce||0))));
       this.hp -= dmg; this.tookDamage=true;
       // usure de l'équipement porté (l'élite niv 5+ s'use 25 % moins vite)
+      const usure = lv => raw * (lv>=5 ? .6 : .8);
       if(this.player && run && run.dura){
-        const usure = lv => raw * (lv>=5 ? .6 : .8);
         if(atkType==='high' && run.equip.casque>0 && run.dura.casque>0){
           run.dura.casque -= usure(run.equip.casque);
           if(run.dura.casque<=0){ run.dura.casque=0;
@@ -517,6 +518,23 @@ class Fighter {
           run.dura.cuirasse -= usure(run.equip.cuirasse);
           if(run.dura.cuirasse<=0){ run.dura.cuirasse=0;
             addFloater(this.x, GROUND-235+this.y, 'CUIRASSE BRISÉE !', '#ff8c42'); sfx.shatter(); }
+        }
+      } else if(!this.player && this.eqv && this.dura){
+        // l'IA subit la même usure : son équipement vole en éclats et disparaît
+        if(atkType==='high' && this.eqv.casque>0 && this.dura.casque>0){
+          this.dura.casque -= usure(this.eqv.casque);
+          if(this.dura.casque<=0){
+            this.eqv.casque=0; this.dmgTakenMult+=.08;
+            addFloater(this.x, GROUND-235+this.y, 'CASQUE ARRACHÉ !', '#7ee787');
+            sparks(this.x, GROUND-140+this.y, '#b9b9c4', 14); sfx.shatter();
+          }
+        } else if(atkType!=='high' && this.eqv.cuirasse>0 && this.dura.cuirasse>0){
+          this.dura.cuirasse -= usure(this.eqv.cuirasse);
+          if(this.dura.cuirasse<=0){
+            this.eqv.cuirasse=0; this.armorFlat=Math.max(0, this.armorFlat-3);
+            addFloater(this.x, GROUND-235+this.y, 'CUIRASSE ARRACHÉE !', '#7ee787');
+            sparks(this.x, GROUND-90+this.y, '#b9b9c4', 16); sfx.shatter();
+          }
         }
       }
       this.flash=1; this.state='hit'; this.t=0; this.blocking=false; this.crouch=false;

@@ -222,6 +222,12 @@ eval(src + `;(${function(){
   check('réparer coûte moins cher qu acheter', repairPrice('casque') < equipPrice('casque'));
   for(let i=0;i<60 && run.dura.cuirasse>0;i++){ player.state='idle'; player.hp=200; player.takeHit(20, enemy, 'mid'); }
   check('la cuirasse se brise sous les coups au corps', run.dura.cuirasse===0);
+  /* l'IA subit la même usure : équipement arraché et retiré du visuel */
+  run=newRun('T'); run.level=20; startFight();
+  enemy.eqv.casque=3; enemy.dura={casque:duraMax(3), cuirasse:duraMax(enemy.eqv.cuirasse||0)};
+  player.x=enemy.x-40; player.facing=1; player.aw=WEAPONS.gladius;
+  for(let i=0;i<60 && enemy.eqv.casque>0;i++){ enemy.state='idle'; enemy.hp=500; enemy.st.stun=0; enemy.takeHit(20, player, 'high'); }
+  check('casque de l IA arraché (disparaît du visuel)', enemy.eqv.casque===0);
 
   /* ---- boss : compétences spéciales ---- */
   run=newRun('T'); run.level=10; startFight();
