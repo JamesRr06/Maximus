@@ -2235,7 +2235,6 @@ function drawOptions(t){
     title2(GFXP[gq].nom, gx+gw/2, gy+19, 13, sel?'#7ee787':'#ddd');
     game.cards.push({x:gx,y:gy,w:gw,h:28,action:()=>{saveData.gfx=gq; persist();}});
   });
-  title2('bas = ni particules ni foule · moyen = allégé · élevé = tous les effets', ctlX+vbw/2+60, 152, 11, '#999');
   // ---- musique de menu ----
   ctx.textAlign='right'; ctx.fillStyle='#fff'; ctx.font='16px Georgia';
   ctx.fillText('Musique menu', labX, 192);
