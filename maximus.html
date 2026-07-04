@@ -226,14 +226,14 @@ function crowdCheer(dur=3, vol=.5){
 }
 
 /* musique de menu (embarquée) — jouée du menu jusqu'au lancement du combat,
-   à 50 % du volume général, coupable dans les Options */
+   à 30 % du volume général, coupable dans les Options */
 const MUSIC_SRC = (typeof window!=='undefined' && window.__MUS) ? window.__MUS : '';
 let menuMusic = null;
 function updateMusic(){
   if(typeof Audio === 'undefined' || !MUSIC_SRC) return;
   if(!menuMusic){ menuMusic = new Audio(MUSIC_SRC); menuMusic.loop = true; }
   const enMenu = game.screen!=='fight' && game.screen!=='quit';
-  menuMusic.volume = Math.max(0, Math.min(1, VOL()*.5)) * (saveData.music?1:0);
+  menuMusic.volume = Math.max(0, Math.min(1, VOL()*.3)) * (saveData.music?1:0);
   if(enMenu && saveData.music && VOL()>0){
     if(menuMusic.paused) menuMusic.play().catch(()=>{});
   } else if(!menuMusic.paused) menuMusic.pause();
