@@ -4,6 +4,16 @@ Jeu de combat 1 contre 1 (et 2 contre 1 !) dans la Rome antique : 40 combats,
 une seule vie, trois classes de gladiateurs, armes lançables, pièges d'arène,
 boss à compétences spéciales, or, perks, ulti et tableau des légendes.
 
+## Nouveautés
+
+- **Personnalisation du physique** : sexe, forme de tête, coiffure, barbe, couleur
+  de cheveux, peau et carrure — à la création, modifiable entre les combats
+  (bouton APPARENCE), et pour le Joueur 2 dans les modes à deux. Les adversaires
+  de l'IA reçoivent un physique aléatoire (stable pour une lignée donnée).
+- **Manette remappable** : Options → 🎮 MANETTE pour réassigner chaque bouton.
+- **Roulade traversante** : la roulade passe à travers l'adversaire.
+- **Lancer d'arme** : exige une endurance pleine et la consomme en totalité.
+
 ## Jouer
 
 - **`Maximus.exe`** (Windows 10/11) : double-clic. Fenêtre dédiée, code obfusqué,
@@ -24,7 +34,7 @@ Au premier lancement de l'exe, Windows SmartScreen peut demander confirmation
 | Se déplacer | ← → ou Q/D |
 | Sauter (coûte de l'endurance) | Espace |
 | Esquive (pas rapide) / Roulade (invincible) | E / R (1 s de récupération commune) |
-| Lancer l'arme (lance, couteau, hache) | F |
+| Lancer l'arme (lance, couteau, hache) — endurance pleine requise, consommée en totalité | F |
 | Ulti de classe (rechargée à chaque boss) | X |
 | S'accroupir / Pause | A / Échap |
 

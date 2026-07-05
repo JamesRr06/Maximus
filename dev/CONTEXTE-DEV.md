@@ -1,6 +1,6 @@
 # CONTEXTE-DEV — reprendre le développement de Maximus
 
-Document de passation pour repartir d'un contexte propre. Dernier commit : `2a36fd6`.
+Document de passation pour repartir d'un contexte propre. Dernier commit : voir `git log`.
 
 ## Contenu du dossier
 
@@ -74,6 +74,12 @@ or + boutique, durabilité casque/cuirasse (réparation, l'IA aussi), arènes
 zones latérales seulement), duels 1c2 aléatoires dès le niv. 30 (dégâts −25 %),
 victoire parfaite = +25 % d'or, boss avec capacités spéciales, IA adaptative
 (agressive/défensive selon les PV, lance et ramasse). Manette Xbox : combat complet,
+boutons remappables (Options → Manette, `saveData.pad`, écran `optionsPad`),
+personnalisation du physique (`saveData.look` J1, `saveData.look2` J2, `run.look`,
+écran `perso`, constantes SKINS/HAIRCOLS/COIFFURES/BARBES/TETES/TORSES,
+`randomLook()`) — l'IA reçoit un look aléatoire déterministe (`makeEnemy`).
+Roulade traversante (pas de séparation des corps pendant un roll). Lancer :
+endurance pleine exigée et consommée (joueur seulement).
 menus navigables aux boutons (croix/stick, A valide, B revient). Modes locaux :
 Duel 1v1 et Duo coop contre l'IA (manette = Joueur 2). Rendu haute résolution
 (logique 960×540, canvas mis à l'échelle), musique de menu à 20 % du volume.

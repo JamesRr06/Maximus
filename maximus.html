@@ -86,6 +86,39 @@ const HUES = [
   {nom:'Orange',h:30},{nom:'Cyan',h:180},{nom:'Rose',h:330},{nom:'Or',h:48},
 ];
 
+/* ============ APPARENCE (personnalisation du physique) ============
+   Le look du joueur se choisit à la création (et reste modifiable) ;
+   les ennemis reçoivent un look aléatoire déterministe par lignée. */
+const SKINS = [
+  {nom:'Claire', base:'#e3b98a', light:'#efc99e', dark:'#c79c6e'},
+  {nom:'Hâlée',  base:'#d2a271', light:'#e0b585', dark:'#b3854f'},
+  {nom:'Mate',   base:'#b58152', light:'#c69465', dark:'#96663a'},
+  {nom:'Brune',  base:'#8a5a32', light:'#9c6c42', dark:'#6e4523'},
+  {nom:'Ébène',  base:'#66401f', light:'#7a512c', dark:'#4e2f14'},
+];
+const HAIRCOLS = [
+  {nom:'Noir',c:'#241a12'},{nom:'Brun',c:'#4a3520'},{nom:'Châtain',c:'#6e4f2a'},
+  {nom:'Blond',c:'#c9a55a'},{nom:'Roux',c:'#a34a20'},{nom:'Gris',c:'#9a9a9a'},{nom:'Blanc',c:'#e8e0d0'},
+];
+const COIFFURES = ['Court','Rasé','Long','Queue','Bouclé','Crête'];
+const BARBES = ['Rasé','Moustache','Bouc','Courte','Pleine'];
+const TETES = ['Ovale','Ronde','Carrée','Fine'];
+const TORSES = [{nom:'Athlétique',w:1},{nom:'Mince',w:.85},{nom:'Massif',w:1.18}];
+const DEFAULT_LOOK = {sexe:'h', tete:0, coiffure:0, barbe:0, cheveux:1, peau:0, torse:0};
+function randomLook(rnd){
+  rnd = rnd || Math.random;
+  const sexe = rnd()<.25 ? 'f' : 'h';
+  return {
+    sexe,
+    tete: Math.floor(rnd()*TETES.length),
+    coiffure: sexe==='f' ? [0,2,3,4][Math.floor(rnd()*4)] : Math.floor(rnd()*COIFFURES.length),
+    barbe: sexe==='h' ? Math.floor(rnd()*BARBES.length) : 0,
+    cheveux: Math.floor(rnd()*HAIRCOLS.length),
+    peau: Math.floor(rnd()*SKINS.length),
+    torse: Math.floor(rnd()*TORSES.length),
+  };
+}
+
 /* ============ ÉQUIPEMENT (roguelike, max niv 8 — les dégâts scalent jusqu'au combat 30) ============ */
 const EQUIP_MAX = 8;
 const EQUIP = {
@@ -166,6 +199,8 @@ function makeEnemy(lvl){
     gapClose: Math.min(.6, .15 + i*.012) + (ecl==='double'?.15:0),  // esquive/roulade OFFENSIVE pour fondre sur l'adversaire
     reactMin: Math.max(120, 420 - i*10),
     lvl, hue: boss ? 45 : (0 + (i*37)%50),
+    // physique aléatoire mais stable pour une lignée donnée (mêmes règles que le joueur)
+    look: randomLook(rng),
   };
 }
 
@@ -236,9 +271,9 @@ let menuMusic = null;
 function updateMusic(){
   if(typeof Audio === 'undefined' || !MUSIC_SRC) return;
   if(!menuMusic){ menuMusic = new Audio(MUSIC_SRC); menuMusic.loop = true; }
-  const MENU_SCREENS=['title','nom','mode','classe','couleur','scores','tutoriel','vsSetup','coopJoin'];
+  const MENU_SCREENS=['title','nom','mode','classe','couleur','perso','scores','tutoriel','vsSetup','coopJoin'];
   const enMenu = MENU_SCREENS.includes(game.screen)
-    || (game.screen==='options' && game.optionsFrom!=='pause');
+    || ((game.screen==='options'||game.screen==='optionsPad') && game.optionsFrom!=='pause');
   menuMusic.volume = Math.max(0, Math.min(1, VOL()*.2)) * (saveData.music?1:0);
   if(enMenu && saveData.music && VOL()>0){
     if(menuMusic.paused) menuMusic.play().catch(()=>{});
@@ -252,12 +287,18 @@ function newRun(name){
     stats: {vie:0, armure:0, endurance:0},
     equip: Object.assign({}, EQUIP_ZERO),
     weapon: 'gladius', classe: 'bouclier', hue: 210, gold: 0,
+    look: JSON.parse(JSON.stringify((typeof saveData!=='undefined'&&saveData.look)||DEFAULT_LOOK)),
     ulti: false, flawless: false,
     dura: {casque: 40, cuirasse: 40},   // durabilité du casque et de la cuirasse
     seed: Math.floor(Math.random()*1e9),
   };
 }
 const DEFAULT_KEYS = {left:['ArrowLeft','q'], right:['ArrowRight','d'], jump:['Space'], crouch:['a','ArrowDown'], dodge:['e'], roll:['r'], throw:['f'], ulti:['x'], pause:['Escape','p']};
+/* boutons de manette remappables (indices Gamepad API standard) */
+const DEFAULT_PAD = {jump:0, attack:2, dodge:1, roll:4, throw:5, ulti:3, guard:7, pause:9};
+const PAD_LABELS = {attack:'Attaquer', guard:'Garde / main gauche', jump:'Sauter', dodge:'Esquive (pas rapide)', roll:'Roulade (invincible)', throw:'Lancer l’arme', ulti:'Ulti (après un boss)', pause:'Pause'};
+const PAD_BTN_NAMES = {0:'A',1:'B',2:'X',3:'Y',4:'LB',5:'RB',6:'LT',7:'RT',8:'BACK',9:'START',10:'L3',11:'R3',12:'CROIX ↑',13:'CROIX ↓',14:'CROIX ←',15:'CROIX →'};
+function padBtnName(i){ return PAD_BTN_NAMES[i]!==undefined ? PAD_BTN_NAMES[i] : 'BTN '+i; }
 const KEY_LABELS = {left:'Aller à gauche', right:'Aller à droite', jump:'Sauter', crouch:'S’accroupir', dodge:'Esquive (pas rapide)', roll:'Roulade (invincible)', throw:'Lancer l’arme', ulti:'Ulti (après un boss)', pause:'Pause'};
 /* ulti par classe, rechargée à chaque boss vaincu, un seul usage */
 const ULTIS = {
@@ -274,6 +315,11 @@ if(!saveData.scores) saveData.scores=[];
 if(!saveData.keys) saveData.keys = JSON.parse(JSON.stringify(DEFAULT_KEYS));
 for(const k in DEFAULT_KEYS) if(!saveData.keys[k]) saveData.keys[k]=DEFAULT_KEYS[k].slice();
 const binds = saveData.keys;
+if(!saveData.pad) saveData.pad = Object.assign({}, DEFAULT_PAD);
+for(const k in DEFAULT_PAD) if(saveData.pad[k]===undefined) saveData.pad[k]=DEFAULT_PAD[k];
+const padBinds = saveData.pad;
+if(!saveData.look) saveData.look = Object.assign({}, DEFAULT_LOOK);   // physique du Joueur 1
+if(!saveData.look2) saveData.look2 = randomLook();                    // physique du Joueur 2 (manette)
 /* qualité graphique : particules, ombres portées, animation de la foule, détails */
 const GFXP = {
   low:   {part:0,  shadows:false, crowdAnim:false, detail:false, nom:'BAS'},
@@ -312,21 +358,33 @@ function updatePads(){
     const f=padFighterFor(p.index);
     const enCombat = game.screen==='fight' && !game.paused;
     if(enCombat && f && !f.dead){
-      if(padPressed(p,9)){ game.paused=true; continue; }
-      if(padPressed(p,0)) f.jump();
-      if(padPressed(p,2)) f.startAttack();
-      if(padPressed(p,1)){ const d=padAxisX(p); f.startDash(d?Math.sign(d):-f.facing); }
-      if(padPressed(p,4)){ const d=padAxisX(p); f.startRoll(d?Math.sign(d):-f.facing); }
-      if(padPressed(p,5)) f.startThrow();
-      if(padPressed(p,3)) f.activateUlti();
-      const rt = (p.buttons[7] && (p.buttons[7].value>.4 || p.buttons[7].pressed)) || padBtn(p,6);
-      if(f.classe==='double'){ if(padPressed(p,7)) f.startAttack(null,true); }
+      if(padPressed(p,padBinds.pause)){ game.paused=true; continue; }
+      if(padPressed(p,padBinds.jump)) f.jump();
+      if(padPressed(p,padBinds.attack)) f.startAttack();
+      if(padPressed(p,padBinds.dodge)){ const d=padAxisX(p); f.startDash(d?Math.sign(d):-f.facing); }
+      if(padPressed(p,padBinds.roll)){ const d=padAxisX(p); f.startRoll(d?Math.sign(d):-f.facing); }
+      if(padPressed(p,padBinds.throw)) f.startThrow();
+      if(padPressed(p,padBinds.ulti)) f.activateUlti();
+      const gb=p.buttons[padBinds.guard];
+      const rt = !!(gb && (gb.value>.4 || gb.pressed));
+      if(f.classe==='double'){ if(padPressed(p,padBinds.guard)) f.startAttack(null,true); }
       else {
         if(rt && !f.busy && f.canBlock() && !f.airborne && f.st.stun<=0) f.blocking=true;
         else if(!rt && f.padBlock) f.blocking=false;
         f.padBlock=rt;
       }
     } else {
+      // capture d'un bouton pour le remappage (écran Options > Manette)
+      if(game.padRebind){
+        let got=null;
+        for(let i=0;i<Math.min(16,p.buttons.length);i++) if(padPressed(p,i)) got=i;
+        if(got!==null){
+          padBinds[game.padRebind]=got;
+          saveData.pad=padBinds; persist();
+          game.padRebind=null; sfx.pick();
+        }
+        continue;   // pendant la capture, pas de navigation de menu
+      }
       // navigation dans les menus : croix / stick = bouton suivant, A valide, B revient
       pads.active=true;
       const scr=game.screen+(game.paused?'+p':'');
@@ -338,7 +396,7 @@ function updatePads(){
         if(c) c.action();
       }
       if(padPressed(p,1)) handleKey({code:'Escape', key:'Escape'});
-      if(padPressed(p,9) && game.screen==='fight') game.paused=false;
+      if(padPressed(p,padBinds.pause) && game.screen==='fight') game.paused=false;
     }
   }
 }
@@ -365,6 +423,21 @@ function padMoveSel(dx,dy){ // plus proche bouton dans la direction demandée
     const d = along + ortho*2.2;              // pénalise l'écart latéral
     if(d<bd){ bd=d; best=i; }
   });
+  // rien dans cette direction : on BOUCLE de l'autre côté de l'écran,
+  // pour que TOUS les boutons restent accessibles à la manette
+  if(best<0){
+    let bw=-1, wd=-1e9;
+    cards.forEach((c,i)=>{
+      if(i===pads.sel) return;
+      const ox=c.x+c.w/2-cx, oy=c.y+c.h/2-cy;
+      const back = dx ? -ox*dx : -oy*dy;      // distance vers l'arrière
+      if(back<=8) return;
+      const ortho = dx ? Math.abs(oy) : Math.abs(ox);
+      const d = back - ortho*2.2;             // le plus loin en arrière, le plus aligné
+      if(d>wd){ wd=d; bw=i; }
+    });
+    best=bw;
+  }
   if(best>=0) pads.sel=best;
 }
 function drawPadSel(){ // liseré doré autour du bouton sélectionné à la manette
@@ -427,6 +500,7 @@ class Fighter {
     this.armorFlat=opts.armorFlat||0; this.dmgTakenMult=opts.dmgTakenMult||1;
     this.isAI=!!opts.ai; this.ai=opts.ai||null;
     this.hue=opts.hue; this.player=!!opts.player; this.name=opts.name;
+    this.look=opts.look||null;   // physique (sexe, tête, coiffure, barbe, cheveux, peau, torse)
     this.state='idle'; this.t=0;
     this.attackPhase=null; this.attackType='mid'; this.hasHit=false; this.airAttacked=false;
     this.blocking=false; this.crouch=false;
@@ -488,8 +562,17 @@ class Fighter {
     const P = {lance:{v:760, vy:-50, cost:15, mult:1.6},
                couteau:{v:880, vy:-25, cost:10, mult:1.3},
                hache:{v:640, vy:-90, cost:15, mult:1.5}}[tw];
-    if(this.stam < P.cost) return;
-    this.stam -= P.cost;
+    if(this.player){
+      // joueur : le lancer exige une endurance PLEINE et la consomme en totalité
+      if(this.stam < this.maxStam-0.01){
+        addFloater(this.x, GROUND-170+this.y, 'endurance pleine requise !', '#ffe97a');
+        return;
+      }
+      this.stam = 0;
+    } else {
+      if(this.stam < P.cost) return;
+      this.stam -= P.cost;
+    }
     this.blocking=false; this.crouch=false;
     spears.push({x:this.x+this.facing*28, y:GROUND-95+this.y, vx:this.facing*P.v, vy:P.vy,
                  w:this.w, owner:this, type:tw, mult:P.mult, spin:0});
@@ -1018,6 +1101,11 @@ function handleKey(e){
     }
     return;
   }
+  if(S==='optionsPad'){
+    if(code==='Escape'){ if(game.padRebind) game.padRebind=null; else game.screen='options'; }
+    return;
+  }
+  if(S==='perso' && code==='Escape'){ game.screen=game.persoFrom||'couleur'; return; }
   if((S==='options'||S==='tutoriel') && code==='Escape'){ optionsBack(); return; }
   if((code==='Space'||code==='Enter') && game.time-(game.screenAt||0)>.35) advance();
 }
@@ -1392,6 +1480,7 @@ function playerOpts(){
     stunCh: (q.percussion||0)*.06,
     riposte: run.classe==='bouclier' ? (q.riposte||0)*.10 : 0,
     player:true, hue:run.hue, classe:run.classe, name:run.name.toUpperCase(),
+    look: run.look || saveData.look,
   };
 }
 function migrateRun(r){
@@ -1402,6 +1491,7 @@ function migrateRun(r){
   if(r.ulti===undefined) r.ulti=false;
   if(r.flawless===undefined) r.flawless=false;
   if(!r.dura) r.dura={casque:duraMax(r.equip.casque||0), cuirasse:duraMax(r.equip.cuirasse||0)};
+  if(!r.look) r.look=JSON.parse(JSON.stringify(saveData.look||DEFAULT_LOOK));
   if(!r.seed) r.seed=Math.floor(Math.random()*1e9);
   if(!TREES[r.classe][r.weapon]) r.weapon=Object.keys(TREES[r.classe])[0];
   return r;
@@ -1448,10 +1538,10 @@ function startFight(){
   const coop = game.mode==='coop' && game.coopOn;
   const duo = coop || duoAtLevel(run.level);
   const dmgScale = coop ? .8 : (duo ? .75 : 1);
-  const mkE = (x, suffix, hueShift, weapon) => new Fighter(x, -1, weapon||e.weapon,
+  const mkE = (x, suffix, hueShift, weapon, look) => new Fighter(x, -1, weapon||e.weapon,
     {hp:e.hp, stam:100, speed:e.speed, dmgMult:e.dmgMult*dmgScale, armorFlat:e.armor,
      ai:e, hue:(e.hue+hueShift)%360, stunCh:e.boss?.12:0, classe:e.classe, eqv:e.eqv,
-     name:e.name+suffix+(e.boss?' ★':'')});
+     name:e.name+suffix+(e.boss?' ★':''), look:look||e.look});
   enemy = mkE(duo?640:720, '', 0);
   let w2 = e.weapon;
   if(duo){ // arme différente pour le second
@@ -1460,12 +1550,14 @@ function startFight(){
     w2 = tr2[(tr2.indexOf(e.weapon) + 1 + Math.floor(rng2()*(tr2.length-1))) % tr2.length];
     if(w2===e.weapon) w2 = tr2[(tr2.indexOf(e.weapon)+1)%tr2.length];
   }
-  enemy2 = duo ? mkE(810, ' II', 140, w2) : null;
+  // le second adversaire a son propre physique (déterministe lui aussi)
+  const rngL=mulberry32(((run&&run.seed)||0) + run.level*7919 + 31);
+  enemy2 = duo ? mkE(810, ' II', 140, w2, randomLook(rngL)) : null;
   // Joueur 2 (manette) en coop : mêmes stats de lignée, sa classe et sa couleur
   if(coop){
     const saveCl=run.classe, saveHue=run.hue;
     run.classe=game.coopClasse||saveCl; run.hue=game.coopHue!==undefined?game.coopHue:330;
-    const o2=playerOpts(); o2.name='JOUEUR 2';
+    const o2=playerOpts(); o2.name='JOUEUR 2'; o2.look=saveData.look2;
     run.classe=saveCl; run.hue=saveHue;
     const t2=TREES[o2.classe], u2=Object.keys(t2).filter(k=>t2[k]<=run.wins);
     player2=new Fighter(330, 1, u2[u2.length-1]||Object.keys(t2)[0], o2);
@@ -1707,9 +1799,18 @@ function drawFighter(f, t){
   if(!f.dead && f.state!=='roll') ctx.rotate((f.vx*f.facing)/2400);
   const c='hsl('+f.hue+',55%,'+(f.player?52:45)+'%)';
   const cDark='hsl('+f.hue+',55%,32%)';
-  const skin='#e3b98a';
+  // physique personnalisé : peau, cheveux, carrure
+  const lk = f.look || DEFAULT_LOOK;
+  const sk = SKINS[lk.peau] || SKINS[0];
+  const skin = sk.base;
+  const hairC = (HAIRCOLS[lk.cheveux]||HAIRCOLS[1]).c;
+  const twd = (TORSES[lk.torse]||TORSES[0]).w * (lk.sexe==='f' ? .92 : 1);   // largeur du torse
+  const armW = lk.torse===2 ? 9 : (lk.torse===1 ? 7 : 8);
+  const legW = lk.torse===2 ? 10 : (lk.torse===1 ? 8 : 9);
   // niveaux d'équipement visibles : joueur = achats · ennemis = généré avec leur niveau
-  const eqv = (f.player&&run)
+  const eqv = f.noEquip
+    ? {casque:0, cuirasse:0, vitesse:0, bouclier:0, arme:0}
+    : (f.player&&run)
     ? Object.assign({}, run.equip, {
         casque: (run.dura&&run.dura.casque>0) ? run.equip.casque : 0,
         cuirasse: (run.dura&&run.dura.cuirasse>0) ? run.equip.cuirasse : 0,
@@ -1733,7 +1834,7 @@ function drawFighter(f, t){
     ctx.fillStyle = eqv.cuirasse>=3 ? c : skin;
     ctx.beginPath(); ctx.arc(0,0,20,0,7); ctx.fill();
     // dos arrondi (cuirasse ou peau plus sombre)
-    ctx.fillStyle = eqv.cuirasse>=3 ? cDark : '#c79c6e';
+    ctx.fillStyle = eqv.cuirasse>=3 ? cDark : sk.dark;
     ctx.beginPath(); ctx.arc(0,0,20,Math.PI*.75,Math.PI*1.75); ctx.lineTo(0,0); ctx.closePath(); ctx.fill();
     // bras et jambes repliés
     ctx.strokeStyle=skin; ctx.lineWidth=6; ctx.lineCap='round';
@@ -1753,7 +1854,7 @@ function drawFighter(f, t){
   }
 
   // jambes
-  ctx.strokeStyle=skin; ctx.lineWidth=9; ctx.lineCap='round';
+  ctx.strokeStyle=skin; ctx.lineWidth=legW; ctx.lineCap='round';
   const lg=f.state==='walk'?Math.sin(f.walkT)*14:(f.airborne?12:5);
   const knee=cr?18:0;
   ctx.beginPath(); ctx.moveTo(-6,(-58+bob)*ch); ctx.lineTo(-8-lg*.6-knee,(-28)*ch+ (cr?6:0)); ctx.lineTo(-10-lg,0); ctx.stroke();
@@ -1776,43 +1877,55 @@ function drawFighter(f, t){
       ctx.fillStyle=cachedGrad('cuir'+f.hue+(f.player?'P':'E'), -104, -50,
         'hsl('+f.hue+',60%,'+(f.player?60:52)+'%)', 'hsl('+f.hue+',55%,'+(f.player?40:34)+'%)');
     } else ctx.fillStyle=c;
-    ctx.beginPath(); ctx.moveTo(-18,ty); ctx.lineTo(18,ty); ctx.lineTo(14,tby); ctx.lineTo(-14,tby); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-18*twd,ty); ctx.lineTo(18*twd,ty); ctx.lineTo(14*twd,tby); ctx.lineTo(-14*twd,tby); ctx.closePath(); ctx.fill();
     ctx.strokeStyle=cDark; ctx.lineWidth=2;
-    for(let i=1;i<4;i++){ const yy=ty+(tby-ty)*i/4; ctx.beginPath(); ctx.moveTo(-17+i,yy); ctx.lineTo(17-i,yy); ctx.stroke(); }
+    for(let i=1;i<4;i++){ const yy=ty+(tby-ty)*i/4; ctx.beginPath(); ctx.moveTo((-17+i)*twd,yy); ctx.lineTo((17-i)*twd,yy); ctx.stroke(); }
     if(cuirLv>=5){ // liseré doré du champion
       ctx.strokeStyle='#f5c542'; ctx.lineWidth=2.5;
-      ctx.beginPath(); ctx.moveTo(-18,ty); ctx.lineTo(18,ty); ctx.lineTo(14,tby); ctx.lineTo(-14,tby); ctx.closePath(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-18*twd,ty); ctx.lineTo(18*twd,ty); ctx.lineTo(14*twd,tby); ctx.lineTo(-14*twd,tby); ctx.closePath(); ctx.stroke();
     }
   } else {
-    // torse nu
-    if(GFX().detail){ ctx.fillStyle=cachedGrad('peau', -104, -50, '#efc99e', '#cfa070'); }
+    // torse nu — dégradé selon la couleur de peau choisie
+    if(GFX().detail){ ctx.fillStyle=cachedGrad('peau'+lk.peau, -104, -50, sk.light, sk.dark); }
     else ctx.fillStyle=skin;
-    ctx.beginPath(); ctx.moveTo(-17,ty+1); ctx.lineTo(17,ty+1); ctx.lineTo(13,tby); ctx.lineTo(-13,tby); ctx.closePath(); ctx.fill();
-    if(GFX().detail){ // pectoraux et abdominaux
-      ctx.strokeStyle='#c79c6e'; ctx.lineWidth=1.5;
-      ctx.beginPath(); ctx.arc(-6,ty+13,7,.3,Math.PI-.3); ctx.stroke();
-      ctx.beginPath(); ctx.arc(8,ty+13,7,.3,Math.PI-.3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-17*twd,ty+1); ctx.lineTo(17*twd,ty+1); ctx.lineTo(13*twd,tby); ctx.lineTo(-13*twd,tby); ctx.closePath(); ctx.fill();
+    if(lk.sexe==='f'){
+      // strophium (bande de tissu) aux couleurs du gladiateur
+      ctx.fillStyle=cDark;
+      ctx.beginPath(); ctx.moveTo(-16*twd,ty+6); ctx.lineTo(16*twd,ty+6); ctx.lineTo(15*twd,ty+17); ctx.lineTo(-15*twd,ty+17); ctx.closePath(); ctx.fill();
+      if(GFX().detail){ // taille et abdominaux
+        ctx.strokeStyle=sk.dark; ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.moveTo(0,ty+22); ctx.lineTo(0,tby-4); ctx.stroke();
+      }
+    } else if(GFX().detail){ // pectoraux et abdominaux
+      ctx.strokeStyle=sk.dark; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.arc(-6*twd,ty+13,7,.3,Math.PI-.3); ctx.stroke();
+      ctx.beginPath(); ctx.arc(8*twd,ty+13,7,.3,Math.PI-.3); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0,ty+20); ctx.lineTo(0,tby-4); ctx.stroke();
-      for(let i=1;i<3;i++){ const yy=ty+22+i*8; ctx.beginPath(); ctx.moveTo(-7,yy); ctx.lineTo(7,yy); ctx.stroke(); }
+      for(let i=1;i<3;i++){ const yy=ty+22+i*8; ctx.beginPath(); ctx.moveTo(-7*twd,yy); ctx.lineTo(7*twd,yy); ctx.stroke(); }
     }
     if(cuirLv>=1){ // harnais de cuir en bandoulière
       ctx.strokeStyle='#5a3d1e'; ctx.lineWidth=7;
-      ctx.beginPath(); ctx.moveTo(-14,ty+3); ctx.lineTo(13,tby-4); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-14*twd,ty+3); ctx.lineTo(13*twd,tby-4); ctx.stroke();
       ctx.fillStyle='#caa04a'; ctx.beginPath(); ctx.arc(0,(ty+tby)/2,4,0,7); ctx.fill();
       if(cuirLv>=2){ ctx.strokeStyle='#5a3d1e'; ctx.lineWidth=5;
-        ctx.beginPath(); ctx.moveTo(14,ty+3); ctx.lineTo(-13,tby-4); ctx.stroke(); }
+        ctx.beginPath(); ctx.moveTo(14*twd,ty+3); ctx.lineTo(-13*twd,tby-4); ctx.stroke(); }
     }
   }
   if(GFX().detail){ // ceinture de la jupe
-    ctx.fillStyle='#5a3d1e'; ctx.fillRect(-15,tby-4,30,5);
+    ctx.fillStyle='#5a3d1e'; ctx.fillRect(-15*twd,tby-4,30*twd,5);
     ctx.fillStyle='#caa04a'; ctx.fillRect(-3,tby-5,6,7);
   }
   ctx.fillStyle=cDark; // jupe romaine (pteruges) — toujours portée, aux couleurs du gladiateur
   for(let i=-2;i<=2;i++){ ctx.fillRect(i*7-3,tby-1,6,14); }
 
-  // tête : nue avec bandeau au départ, casque dès l'achat (grossit avec le niveau)
+  // tête : forme personnalisable, nue avec bandeau au départ, casque dès l'achat
   const helmLv = eqv.casque;
-  ctx.fillStyle=skin; ctx.beginPath(); ctx.arc(4,hy,13,0,7); ctx.fill();
+  const hr = lk.tete===1 ? 14 : (lk.tete===3 ? 11.5 : 13);   // ronde / fine / ovale·carrée
+  ctx.fillStyle=skin; ctx.beginPath(); ctx.arc(4,hy,hr,0,7); ctx.fill();
+  if(lk.tete===2){ // mâchoire carrée
+    ctx.fillRect(4-hr*.85, hy, hr*1.7, hr*.8);
+  }
   if(helmLv>0){
     ctx.fillStyle='#b9b9c4';
     ctx.beginPath(); ctx.arc(4,hy-2,14+helmLv*.8,Math.PI*.95,Math.PI*2.08); ctx.fill();
@@ -1824,17 +1937,53 @@ function drawFighter(f, t){
     ctx.fillStyle = f.player ? 'hsl('+f.hue+',72%,48%)' : (f.ai&&f.ai.boss ? '#ffcf3f' : '#c23a3a');
     ctx.beginPath(); ctx.moveTo(-8,hy-10); ctx.quadraticCurveTo(6,hy-30-helmLv*2,20,hy-8); ctx.quadraticCurveTo(6,hy-18,-8,hy-10); ctx.fill();
   } else {
-    // cheveux courts + bandeau aux couleurs du gladiateur
-    ctx.fillStyle='#4a3520';
-    ctx.beginPath(); ctx.arc(3,hy-3,12,Math.PI*.9,Math.PI*2.05); ctx.fill();
+    // coiffure personnalisée + bandeau aux couleurs du gladiateur
+    ctx.fillStyle=hairC;
+    const co=lk.coiffure;
+    if(co===1){ // rasé : simple ombre de crâne
+      ctx.globalAlpha=.28;
+      ctx.beginPath(); ctx.arc(3,hy-3,hr-1,Math.PI*.9,Math.PI*2.05); ctx.fill();
+      ctx.globalAlpha=1;
+    } else if(co===2){ // long : chevelure qui tombe dans le dos
+      ctx.beginPath(); ctx.arc(3,hy-3,hr-.5,Math.PI*.85,Math.PI*2.1); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-8,hy-7);
+      ctx.quadraticCurveTo(-15,hy+8,-12,hy+22); ctx.lineTo(-5,hy+18);
+      ctx.quadraticCurveTo(-8,hy+6,-6,hy-4); ctx.closePath(); ctx.fill();
+    } else if(co===3){ // queue de cheval
+      ctx.beginPath(); ctx.arc(3,hy-3,hr-1,Math.PI*.9,Math.PI*2.05); ctx.fill();
+      ctx.strokeStyle=hairC; ctx.lineWidth=5; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(-8,hy-6); ctx.quadraticCurveTo(-16,hy+2,-13,hy+17); ctx.stroke();
+    } else if(co===4){ // bouclé
+      for(const [ox,oy] of [[-7,-8],[-1,-12],[6,-11],[12,-5],[-10,-3]]){
+        ctx.beginPath(); ctx.arc(3+ox,hy+oy,4.5,0,7); ctx.fill();
+      }
+    } else if(co===5){ // crête
+      ctx.beginPath(); ctx.moveTo(-6,hy-8); ctx.quadraticCurveTo(4,hy-27,15,hy-7);
+      ctx.quadraticCurveTo(4,hy-14,-6,hy-8); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(3,hy-3,hr-2,Math.PI*1.05,Math.PI*1.95); ctx.fill();
+    } else { // court (défaut)
+      ctx.beginPath(); ctx.arc(3,hy-3,hr-1,Math.PI*.9,Math.PI*2.05); ctx.fill();
+    }
     ctx.fillStyle = f.player ? 'hsl('+f.hue+',72%,48%)' : '#c23a3a';
     ctx.fillRect(-8,hy-8,22,4);
+  }
+  // barbe (visible même sous le casque)
+  if(lk.sexe!=='f' && lk.barbe>0){
+    ctx.fillStyle=hairC;
+    if(lk.barbe===1){ ctx.fillRect(7,hy+4,9,2.5); }                    // moustache
+    else if(lk.barbe===2){ ctx.fillRect(7,hy+4,9,2); ctx.fillRect(9,hy+8,6,5); }  // bouc
+    else if(lk.barbe===3){ // barbe courte le long de la mâchoire
+      ctx.beginPath(); ctx.arc(4,hy+1,hr-2,-.35,Math.PI*.8); ctx.closePath(); ctx.fill();
+    } else { // barbe pleine
+      ctx.beginPath(); ctx.arc(4,hy+2,hr-1,-.4,Math.PI*.85);
+      ctx.quadraticCurveTo(11,hy+hr+7,2,hy+hr+5); ctx.lineTo(-3,hy+7); ctx.closePath(); ctx.fill();
+    }
   }
   ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(10,hy+1,2,0,7); ctx.fill();
 
   // bras arrière : bouclier, garde à l'arme, ou seconde lame selon la classe
   const sy=(-92+bob)*ch;
-  ctx.strokeStyle=skin; ctx.lineWidth=8;
+  ctx.strokeStyle=skin; ctx.lineWidth=armW;
   const fcl = f.classe || 'bouclier';
   const isDual = fcl==='double';
   const isTwoH = fcl==='deuxmains';
@@ -1919,7 +2068,7 @@ function drawFighter(f, t){
   // épaulière
   if(GFX().detail){ ctx.fillStyle=cDark; ctx.beginPath(); ctx.arc(sx0, sy0-2, 10, 0, 7); ctx.fill();
     ctx.fillStyle='rgba(255,255,255,.18)'; ctx.beginPath(); ctx.arc(sx0-2, sy0-5, 4, 0, 7); ctx.fill(); }
-  ctx.strokeStyle=skin; ctx.lineWidth=8;
+  ctx.strokeStyle=skin; ctx.lineWidth=armW;
   ctx.beginPath(); ctx.moveTo(sx0,sy0); ctx.lineTo(ex,ey); ctx.stroke();
   drawWeapon(f, ex, ey, armAng);
   ctx.restore();
@@ -1986,8 +2135,9 @@ function weaponShape(k,w){
 
 function drawWeapon(f, ex, ey, armAng){
   const w=f.w, k=f.weaponKey;
-  if(w.fists){ // poings nus (lance jetée) : simple poing fermé
-    ctx.fillStyle='#d5a878'; ctx.beginPath(); ctx.arc(ex,ey,6,0,7); ctx.fill();
+  if(w.fists){ // poings nus (lance jetée) : simple poing fermé, couleur de peau
+    ctx.fillStyle=(SKINS[(f.look||DEFAULT_LOOK).peau]||SKINS[0]).base;
+    ctx.beginPath(); ctx.arc(ex,ey,6,0,7); ctx.fill();
     return;
   }
   // les lances restent droites au repos et basculent vers l'avant pendant l'estoc
@@ -2071,7 +2221,7 @@ function drawHUD(){
       const pulse=.5+Math.sin(game.time*7)*.35;
       ctx.strokeStyle='rgba(245,197,66,'+pulse+')'; ctx.lineWidth=3;
       ctx.beginPath(); ctx.roundRect(bx,by,bw,34,10); ctx.stroke();
-      title2('★ ULTI PRÊTE — '+uInfo.nom.toUpperCase()+'  ·  touche '+bindLabel('ulti')+' / manette Y', W/2, by+22, 14, '#f5c542');
+      title2('★ ULTI PRÊTE — '+uInfo.nom.toUpperCase()+'  ·  touche '+bindLabel('ulti')+' / manette '+padBtnName(padBinds.ulti), W/2, by+22, 14, '#f5c542');
     } else if(fU){
       ctx.strokeStyle='#f5c542'; ctx.lineWidth=2;
       ctx.beginPath(); ctx.roundRect(bx,by,bw,34,10); ctx.stroke();
@@ -2190,6 +2340,12 @@ function drawVsSetup(t){
       fitText(CLASSES[k].sub, x+w/2, y+48, w-20, 12, '#aaa');
       game.cards.push({x,y,w,h:hh,action:()=>{ game[champ]=k; }});
     });
+    // physique de chaque joueur
+    const tgt = champ==='vsP1' ? 'p1' : 'p2';
+    const py=376;
+    card(x0+60,py,200,28, hover(x0+60,py,200,28));
+    title2('PHYSIQUE →', x0+160, py+19, 12, '#ffb98a');
+    game.cards.push({x:x0+60,y:py,w:200,h:28,action:()=>{game.persoTarget=tgt; game.persoFrom='vsSetup'; game.screen='perso';}});
   }
   const ok = padList().length>0;
   const bx=W/2-130, by=410;
@@ -2205,19 +2361,19 @@ function startVersus(){
   run.dura={casque:duraMax(3), cuirasse:duraMax(3)};
   run.ulti=false; run.flawless=false;
   const armes={bouclier:'gladius', deuxmains:'spathaL', double:'gladii'};
-  const mk=(x,facing,classe,hue,nom,pad)=>{
+  const mk=(x,facing,classe,hue,nom,pad,look)=>{
     const wgt = classe==='double'?0:(classe==='deuxmains'?2:1);
     const f=new Fighter(x,facing,armes[classe],{
       hp:150, stam:115, speed:230, dmgMult:1.15, armorFlat:3, dmgTakenMult:.95,
       shieldMax:110, jumpV:[645,560,505][wgt], jumpCost:[7,8,10][wgt],
       rollCost:[20,24,30][wgt], dashCost:[10,12,15][wgt], rollBoost:1.05, dashBoost:1.05,
       atkSpd:.93, stunCh:.05, riposte:classe==='bouclier'?.2:0,
-      player:true, hue, classe, name:nom});
+      player:true, hue, classe, name:nom, look});
     f.padIdx=pad;
     return f;
   };
-  player  = mk(240, 1, game.vsP1, 210, 'JOUEUR 1', null);
-  player2 = mk(720,-1, game.vsP2, 0,   'JOUEUR 2', 0);
+  player  = mk(240, 1, game.vsP1, 210, 'JOUEUR 1', null, saveData.look);
+  player2 = mk(720,-1, game.vsP2, 0,   'JOUEUR 2', 0,    saveData.look2);
   enemy = player2; enemy2 = null;   // la boucle 1c1 réutilise l'adversaire humain
   shieldDrops=[]; spears=[]; spearDrops=[]; traps=[]; trapTimer=trapDelay()+2;
   game.floaters=[]; game.particles=[]; game.koTimer=0; game.vsWinner=null;
@@ -2250,6 +2406,11 @@ function drawCoopJoin(t){
     game.cards.push({x,y,w,h:hh,action:()=>{ game.coopClasse=k; }});
   });
   game.coopHue = game.coopHue!==undefined ? game.coopHue : 330;
+  // physique du Joueur 2
+  const px2=W/2-130, py2=372;
+  card(px2,py2,260,32, hover(px2,py2,260,32));
+  title2('PHYSIQUE DU JOUEUR 2 →', W/2, py2+21, 13, '#ffb98a');
+  game.cards.push({x:px2,y:py2,w:260,h:32,action:()=>{game.persoTarget='p2'; game.persoFrom='coopJoin'; game.screen='perso';}});
   const bx=W/2-130, by=414;
   card(bx,by,260,48, ok&&hover(bx,by,260,48));
   title(ok?'EN AVANT, DUO !':'MANETTE REQUISE', by+31, 17, ok?'#fff':'#886');
@@ -2324,7 +2485,8 @@ function drawCouleur(t){
     game.cards.push({x,y,w:sw,h:sw,action:()=>{run.hue=c.h; saveData.run=run; persist();}});
   });
   // aperçu du gladiateur
-  if(!previewF || previewF.hue!==run.hue || previewF.classe!==run.classe){
+  if(!previewF || previewF.hue!==run.hue || previewF.classe!==run.classe
+     || JSON.stringify(previewF.look)!==JSON.stringify(run.look)){
     previewF=new Fighter(720, -1, run.weapon, playerOpts());
     previewF.x=720;
   }
@@ -2332,8 +2494,103 @@ function drawCouleur(t){
   drawFighter(previewF, t);
   const bx=W/2-110, by=430;
   card(bx,by,220,46, hover(bx,by,220,46));
-  title('COMMENCER', by+30, 18, '#fff');
-  game.cards.push({x:bx,y:by,w:220,h:46,action:()=>{ if(game.mode==='coop') game.screen='coopJoin'; else gotoSelect(); }});
+  title('SUIVANT : PHYSIQUE', by+30, 17, '#fff');
+  game.cards.push({x:bx,y:by,w:220,h:46,action:()=>{ game.persoTarget='p1'; game.persoFrom='couleur'; game.screen='perso'; }});
+}
+
+/* ============ PERSONNALISATION DU PHYSIQUE ============
+   Cible 'p1' (lignée / Joueur 1) ou 'p2' (Joueur 2 manette).
+   Accessible à la création, entre les combats, et depuis les écrans multi. */
+function persoLook(){
+  if(game.persoTarget==='p2') return saveData.look2;
+  if(run && run.look) return run.look;
+  return saveData.look;
+}
+function persoSave(){
+  if(game.persoTarget!=='p2'){
+    if(run && run.look){ saveData.look=JSON.parse(JSON.stringify(run.look)); saveData.run=run; }
+  }
+  persist();
+}
+let persoPrev=null, persoPrevKey='';
+function persoPreviewF(){
+  const lk=persoLook();
+  const isP2=game.persoTarget==='p2';
+  const classe = isP2
+    ? (game.mode==='versus' ? game.vsP2 : (game.coopClasse||(run?run.classe:'bouclier')))
+    : (game.mode==='versus' ? game.vsP1 : (run?run.classe:'bouclier'));
+  const hue = isP2 ? (game.mode==='versus' ? 0 : (game.coopHue!==undefined?game.coopHue:330))
+                   : (run ? run.hue : 210);
+  const key=JSON.stringify(lk)+'|'+classe+'|'+hue;
+  if(persoPrevKey!==key){
+    persoPrev=new Fighter(700,-1,Object.keys(TREES[classe])[0],
+      {hp:100, stam:100, speed:200, dmgMult:1, player:true, hue, classe, name:'',
+       look:JSON.parse(JSON.stringify(lk))});
+    persoPrev.noEquip=true;
+    persoPrevKey=key;
+  }
+  return persoPrev;
+}
+function drawPerso(t){
+  drawArena(t); overlay(.64); game.cards=[];
+  const lk=persoLook();
+  const isP2=game.persoTarget==='p2';
+  const from=game.persoFrom||'couleur';
+  backBtn(()=>{ game.screen=from; });
+  title('PHYSIQUE '+(isP2?'DU JOUEUR 2':(run&&run.name?'DE '+run.name.toUpperCase():'DU JOUEUR 1')), 74, 28, '#f5c542');
+  // une rangée : libellé, flèches ◀ ▶ et valeur (navigable à la manette)
+  const rows=[
+    ['Sexe',    ()=>lk.sexe==='f'?'Femme':'Homme',
+      d=>{ lk.sexe = lk.sexe==='f'?'h':'f'; if(lk.sexe==='f') lk.barbe=0; }],
+    ['Tête',    ()=>TETES[lk.tete],
+      d=>{ lk.tete=(lk.tete+d+TETES.length)%TETES.length; }],
+    ['Coiffure',()=>COIFFURES[lk.coiffure],
+      d=>{ lk.coiffure=(lk.coiffure+d+COIFFURES.length)%COIFFURES.length; }],
+    ['Barbe',   ()=>lk.sexe==='f'?'—':BARBES[lk.barbe],
+      lk.sexe==='f'?null:(d=>{ lk.barbe=(lk.barbe+d+BARBES.length)%BARBES.length; })],
+    ['Cheveux', ()=>HAIRCOLS[lk.cheveux].nom,
+      d=>{ lk.cheveux=(lk.cheveux+d+HAIRCOLS.length)%HAIRCOLS.length; }, ()=>HAIRCOLS[lk.cheveux].c],
+    ['Peau',    ()=>SKINS[lk.peau].nom,
+      d=>{ lk.peau=(lk.peau+d+SKINS.length)%SKINS.length; }, ()=>SKINS[lk.peau].base],
+    ['Torse',   ()=>TORSES[lk.torse].nom,
+      d=>{ lk.torse=(lk.torse+d+TORSES.length)%TORSES.length; }],
+  ];
+  const LX=118, VX=290, step=44;
+  rows.forEach((r,i)=>{
+    const y=118+i*step;
+    ctx.textAlign='left'; ctx.fillStyle=r[2]?'#fff':'#776f5e'; ctx.font='16px Georgia';
+    ctx.shadowColor='#000'; ctx.shadowBlur=GFX().shadows?4:0;
+    ctx.fillText(r[0], LX, y+21); ctx.shadowBlur=0;
+    if(!r[2]){ title2('—', VX+108, y+21, 14, '#776f5e'); return; }
+    card(VX,y,30,30, hover(VX,y,30,30)); title2('◀', VX+15, y+21, 14, '#ffe9a0');
+    game.cards.push({x:VX,y,w:30,h:30,action:()=>{ r[2](-1); persoSave(); sfx.pick(); }});
+    // pastille de couleur éventuelle + valeur
+    if(r[3]){
+      ctx.fillStyle=r[3](); ctx.strokeStyle='#000'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.roundRect(VX+42,y+7,16,16,4); ctx.fill(); ctx.stroke();
+      fitText(r[1](), VX+128, y+21, 100, 15, '#ffe9a0', true);
+    } else fitText(r[1](), VX+108, y+21, 130, 15, '#ffe9a0', true);
+    card(VX+186,y,30,30, hover(VX+186,y,30,30)); title2('▶', VX+201, y+21, 14, '#ffe9a0');
+    game.cards.push({x:VX+186,y,w:30,h:30,action:()=>{ r[2](1); persoSave(); sfx.pick(); }});
+  });
+  // aperçu animé
+  const pf=persoPreviewF();
+  pf.facing=-1; pf.walkT+=0.05; pf.state='walk';
+  drawFighter(pf, t);
+  title2('(le casque acheté recouvre la coiffure en combat)', 700, 460, 11, '#998e7a');
+  // boutons du bas
+  const ry=118+rows.length*step+6;
+  card(LX,ry,220,36, hover(LX,ry,220,36));
+  title2('🎲 AU HASARD', LX+110, ry+24, 14, '#9fd8ff');
+  game.cards.push({x:LX,y:ry,w:220,h:36,action:()=>{ Object.assign(lk, randomLook()); persoSave(); sfx.pickup(); }});
+  const vy=ry+46;
+  card(LX,vy,220,42, hover(LX,vy,220,42));
+  const lbl = from==='couleur' ? 'COMMENCER' : 'TERMINÉ';
+  title2(lbl, LX+110, vy+27, 16, '#fff');
+  game.cards.push({x:LX,y:vy,w:220,h:42,action:()=>{
+    if(from==='couleur'){ if(game.mode==='coop') game.screen='coopJoin'; else gotoSelect(); }
+    else game.screen=from;
+  }});
 }
 function drawSelect(t){
   drawArena(t); overlay(.6); game.cards=[];
@@ -2371,7 +2628,7 @@ function drawSelect(t){
     game.cards.push({x,y,w:cw,h:150,action:()=>{run.weapon=k; saveData.run=run; persist(); startFight();}});
   });
   // une seule ligne discrète : prochaine arme à débloquer
-  title('➤ = se lance ('+bindLabel('throw')+' / RB)   —   les autres ne se lancent pas', 330, 12, '#b9a97e');
+  title('➤ = se lance ('+bindLabel('throw')+' / '+padBtnName(padBinds.throw)+', endurance pleine requise)   —   les autres ne se lancent pas', 330, 12, '#b9a97e');
   const tr=tree(), locked=Object.keys(tr).filter(k=>tr[k]>run.wins);
   if(locked.length)
     title('Prochaine arme : '+WEAPONS[locked[0]].nom+' ('+tr[locked[0]]+'ᵉ victoire)', 352, 13, '#8f8574');
@@ -2382,6 +2639,11 @@ function drawSelect(t){
   title2('BOUTIQUE', sbx+80, sby+23, 14, '#ffe9a0');
   game.cards.push({x:sbx,y:sby,w:160,h:34,action:()=>{game.shopReturn='select'; game.screen='boutique';}});
   statsBtn('select');
+  // physique modifiable entre les combats
+  const abx=W-204, aby=138;
+  card(abx,aby,180,34, hover(abx,aby,180,34));
+  title2('APPARENCE', abx+90, aby+22, 13, '#ffb98a');
+  game.cards.push({x:abx,y:aby,w:180,h:34,action:()=>{game.persoTarget='p1'; game.persoFrom='select'; game.screen='perso';}});
   title('Clique sur une arme pour lancer le combat', 440, 18, Math.sin(t*4)>0?'#fff':'#f5c542');
 }
 function drawVictory(t){
@@ -2565,16 +2827,56 @@ function drawOptions(t){
     game.cards.push({x:kx,y,w:kw,h:26,action:()=>{game.rebind=a;}});
   });
   // ---- boutons ----
-  const by2=462;
-  const bx1=W/2-345;
-  card(bx1,by2,220,38, hover(bx1,by2,220,38)); title2('TUTORIEL', bx1+110, by2+25, 15, '#9fd8ff');
-  game.cards.push({x:bx1,y:by2,w:220,h:38,action:()=>{game.screen='tutoriel';}});
-  const bx2=W/2-110;
-  card(bx2,by2,220,38, hover(bx2,by2,220,38)); title2('TOUCHES PAR DÉFAUT', bx2+110, by2+25, 13, '#ddd');
-  game.cards.push({x:bx2,y:by2,w:220,h:38,action:()=>{for(const k in DEFAULT_KEYS) binds[k]=DEFAULT_KEYS[k].slice(); saveData.keys=binds; persist();}});
-  const bx3=W/2+125;
-  card(bx3,by2,220,38, hover(bx3,by2,220,38)); title2('RETOUR', bx3+110, by2+25, 15, '#fff');
-  game.cards.push({x:bx3,y:by2,w:220,h:38,action:optionsBack});
+  const by2=462, bw4=172, gap4=12;
+  const bts=[
+    ['TUTORIEL', '#9fd8ff', 14, ()=>{game.screen='tutoriel';}],
+    ['🎮 MANETTE', '#ffb98a', 14, ()=>{game.padRebind=null; game.screen='optionsPad';}],
+    ['TOUCHES PAR DÉFAUT', '#ddd', 12, ()=>{for(const k in DEFAULT_KEYS) binds[k]=DEFAULT_KEYS[k].slice(); saveData.keys=binds; persist();}],
+    ['RETOUR', '#fff', 14, optionsBack],
+  ];
+  const x04=W/2-(bw4*4+gap4*3)/2;
+  bts.forEach((b,i)=>{
+    const bx=x04+i*(bw4+gap4);
+    card(bx,by2,bw4,38, hover(bx,by2,bw4,38));
+    fitText(b[0], bx+bw4/2, by2+25, bw4-14, b[2], b[1], true);
+    game.cards.push({x:bx,y:by2,w:bw4,h:38,action:b[3]});
+  });
+}
+
+/* ============ OPTIONS — MANETTE (boutons remappables) ============ */
+function drawOptionsPad(t){
+  drawArena(t); overlay(.68); game.cards=[];
+  title('MANETTE', 52, 34, '#f5c542');
+  const ok = padList().length>0;
+  title(ok ? 'Manette détectée ✓ — clique une action puis appuie sur un bouton'
+           : 'Branche une manette pour tester (le remappage reste possible)', 88, 14, ok?'#7ee787':'#ff9c9c');
+  title('Fixes : stick / croix = bouger & naviguer  ·  A = valider  ·  B = retour', 112, 13, '#999');
+  const acts=Object.keys(PAD_LABELS);
+  acts.forEach((a,i)=>{
+    const col=i%2, row=Math.floor(i/2);
+    const lx = col===0 ? W/2-330 : W/2+30;
+    const y=150+row*46;
+    ctx.textAlign='left'; ctx.fillStyle='#fff'; ctx.font='14px Georgia';
+    ctx.shadowColor='#000'; ctx.shadowBlur=GFX().shadows?4:0;
+    ctx.fillText(PAD_LABELS[a], lx, y+20); ctx.shadowBlur=0;
+    const kx=lx+178, kw=112;
+    const capturing=game.padRebind===a;
+    card(kx,y,kw,30, capturing||hover(kx,y,kw,30));
+    title2(capturing?'appuie...':padBtnName(padBinds[a]), kx+kw/2, y+20, capturing?11:13, capturing?'#7ee787':'#ffe9a0');
+    game.cards.push({x:kx,y,w:kw,h:30,action:()=>{game.padRebind=a;}});
+  });
+  // doublons signalés
+  const seen={}; let dbl=false;
+  for(const a of acts){ if(seen[padBinds[a]]!==undefined) dbl=true; seen[padBinds[a]]=a; }
+  if(dbl) title('⚠ Deux actions partagent le même bouton', 356, 13, '#ff9c5a');
+  if(game.padRebind) title('ÉCHAP pour annuler la capture', 380, 13, '#ccc');
+  const by2=430, bw4=220;
+  card(W/2-230,by2,bw4,40, hover(W/2-230,by2,bw4,40));
+  title2('BOUTONS PAR DÉFAUT', W/2-120, by2+26, 13, '#ddd');
+  game.cards.push({x:W/2-230,y:by2,w:bw4,h:40,action:()=>{for(const k in DEFAULT_PAD) padBinds[k]=DEFAULT_PAD[k]; saveData.pad=padBinds; persist();}});
+  card(W/2+10,by2,bw4,40, hover(W/2+10,by2,bw4,40));
+  title2('RETOUR', W/2+120, by2+26, 15, '#fff');
+  game.cards.push({x:W/2+10,y:by2,w:bw4,h:40,action:()=>{game.padRebind=null; game.screen='options';}});
 }
 
 function drawTutoriel(t){
@@ -2587,7 +2889,7 @@ function drawTutoriel(t){
     ['#a0d8ff', 18, 'en saut → TÊTE (étourdit)  ·  debout → CORPS (saigne)  ·  accroupi → JAMBES (perce les gardes)'],
     ['#ddd',    26, 'CLIC DROIT = ta défense de classe :'],
     ['#ddd',    18, 'bouclier (Murmillo) · garde à l’arme (Secutor) · coup de main gauche (Dimachaerus)'],
-    ['#ffd7a0', 22, 'Lances, couteaux, haches : '+bindLabel('throw')+' pour les LANCER — marche dessus pour reprendre.'],
+    ['#ffd7a0', 22, 'Lances, couteaux, haches : '+bindLabel('throw')+' pour LANCER (endurance pleine, consommée en totalité).'],
     ['#f5c542', 22, 'CONTRE : une parade ou une roulade parfaite dope ta prochaine attaque (anneau doré).'],
     ['#f5c542', 18, 'ULTI ('+bindLabel('ulti')+') : rechargée à chaque boss vaincu, un seul usage — propre à ta classe.'],
     ['#ff9c5a', 26, 'Arènes II et III : pièges annoncés au sol — saute ou roule !'],
@@ -2724,10 +3026,11 @@ function frame(now){
       for(const f of adversaires) f.update(dt, nearestOf(joueurs, f.x)||player, joueurs);
     }
     updateTraps(dt);
-    // séparation des corps (toutes les paires)
+    // séparation des corps (toutes les paires) — la roulade passe À TRAVERS l'adversaire
     const tousF=fightersAll();
     for(let i=0;i<tousF.length;i++) for(let j=i+1;j<tousF.length;j++){
       const A=tousF[i], B=tousF[j];
+      if(A.state==='roll' || B.state==='roll') continue;
       if(!A.dead && !B.dead){
         const dx=B.x-A.x;
         if(Math.abs(dx)<42 && Math.abs(B.y-A.y)<50){
@@ -2785,7 +3088,9 @@ function frame(now){
   else if(S==='scores') drawScores(t);
   else if(S==='classe') drawClasse(t);
   else if(S==='couleur') drawCouleur(t);
+  else if(S==='perso') drawPerso(t);
   else if(S==='options') drawOptions(t);
+  else if(S==='optionsPad') drawOptionsPad(t);
   else if(S==='tutoriel') drawTutoriel(t);
   else if(S==='select') drawSelect(t);
   else if(S==='upgrade') drawUpgrade(t);

@@ -158,6 +158,12 @@ eval(src + `;(${function(){
   player.startThrow();
   check('hache lançable', player.thrown && spears.length===1 && spears[0].type==='hache');
   check('gladius non lançable', !WEAPONS.gladius.throwType);
+  /* lancer : endurance pleine exigée, consommée en totalité (joueur) */
+  run=newRun('T'); run.wins=7; run.weapon='hasta'; run.level=1; startFight();
+  player.stam=player.maxStam*.8; player.startThrow();
+  check('lancer refusé sous 100 % d’endurance', !player.thrown);
+  player.stam=player.maxStam; player.startThrow();
+  check('lancer : toute l’endurance consommée', player.thrown && player.stam===0);
   /* le saut coûte de l'endurance */
   run=newRun('T'); run.level=1; startFight();
   const st0=player.stam; player.jump();
@@ -323,8 +329,10 @@ eval(src + `;(${function(){
   padMoveSel(1,0);  check('manette : droite → carte voisine', pads.sel===1);
   padMoveSel(0,1);  check('manette : bas → carte du dessous', pads.sel===3);
   padMoveSel(0,-1); check('manette : haut → retour', pads.sel===1);
-  padMoveSel(-1,0); padMoveSel(-1,0);
-  check('manette : butée à gauche', pads.sel===0);
+  padMoveSel(-1,0);
+  check('manette : gauche → carte voisine', pads.sel===0);
+  padMoveSel(-1,0);
+  check('manette : wrap — tous les boutons accessibles en bouclant', pads.sel===2);
   const fakePad={index:0, axes:[.9,0], buttons:Array.from({length:16},()=>({pressed:false,value:0}))};
   pads.dirPrev={};
   check('manette : stick = une impulsion, pas de rafale', padDir(fakePad,'x')===1 && padDir(fakePad,'x')===0 && padDir(fakePad,'x')===0);
@@ -333,6 +341,46 @@ eval(src + `;(${function(){
   pads.sel=1; game.cards[1].action();
   check('manette : A valide le bouton sélectionné', padHit==='milieu');
   game.cards=[];
+
+  // ---- manette : boutons remappables ----
+  check('manette : mapping par défaut', padBinds.attack===2 && padBinds.jump===0 && padBinds.pause===9);
+  padBinds.attack=5;
+  check('manette : remap appliqué (partagé avec la sauvegarde)', saveData.pad.attack===5);
+  padBinds.attack=DEFAULT_PAD.attack;
+  check('manette : noms des boutons', padBtnName(3)==='Y' && padBtnName(9)==='START');
+  game.optionsFrom='title'; drawOptionsPad(1.0);
+  check('écran manette : rendu + cartes', game.cards.length>0);
+
+  // ---- apparence : physique du joueur et looks aléatoires de l'IA ----
+  run=newRun('L');
+  check('joueur : physique par défaut présent', !!run.look && typeof run.look.peau==='number');
+  const lA=makeEnemy(5).look, lB=makeEnemy(5).look;
+  check('IA : physique aléatoire mais déterministe par lignée', JSON.stringify(lA)===JSON.stringify(lB));
+  let lookVarie=false;
+  for(let l=1;l<=12 && !lookVarie;l++) if(JSON.stringify(makeEnemy(l).look)!==JSON.stringify(lA)) lookVarie=true;
+  check('IA : physiques variés d’un adversaire à l’autre', lookVarie);
+  run.level=1; startFight();
+  check('combat : l’ennemi porte son look', !!enemy.look);
+  enemy.look={sexe:'f',tete:1,coiffure:2,barbe:0,cheveux:3,peau:4,torse:1}; drawFighter(enemy,1.0);
+  player.look={sexe:'h',tete:2,coiffure:5,barbe:4,cheveux:0,peau:2,torse:2}; drawFighter(player,1.0);
+  check('rendu des physiques (femme, barbes, coiffures) sans erreur', true);
+  game.persoTarget='p1'; game.persoFrom='couleur';
+  drawPerso(1.0); check('écran physique J1 : rendu + cartes', game.cards.length>0);
+  game.persoTarget='p2'; game.mode='solo'; drawPerso(1.0);
+  check('écran physique J2 : rendu sans erreur', game.cards.length>0);
+  game.persoTarget='p1';
+
+  // ---- roulade : passe à travers l'adversaire ----
+  run=newRun('L'); run.level=1; game.mode='solo'; game.coopOn=false; player2=null; startFight();
+  game.paused=false;
+  player.state='idle'; enemy.st.stun=2; enemy.aiMove=0;
+  player.x=400; enemy.x=408;
+  frame(performance.now());
+  check('corps séparés hors roulade', Math.abs(enemy.x-player.x)>20);
+  player.x=400; enemy.x=408; enemy.st.stun=2;
+  player.state='roll'; player.rollDir=1; player.t=0;
+  frame(performance.now());
+  check('roulade : traverse l’adversaire (pas de séparation)', Math.abs(enemy.x-player.x)<20);
 
   // ---- sélection d'armes : icônes dessinées sans erreur ----
   for(const k of Object.keys(WEAPONS)) drawWeaponIcon(k, 60, 60, 62);
