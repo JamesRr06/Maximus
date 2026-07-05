@@ -149,7 +149,7 @@ const STATS = {
   endurance:{nom:'Endurance', desc:'+10 endurance max',       color:'#ffe97a'},
 };
 
-/* ============ 30 ADVERSAIRES ============ */
+/* ============ 40 ADVERSAIRES ============ */
 const NAMES = ['Marcus','Brutus Minor','Cassius','Drusus','Felix','Gaius','Hostus','Iulius','Lucanus','Flamma',
 'Nerva','Octavus','Priscus','Quintus','Rufus','Severus','Titus','Urbicus','Verus','Carpophorus',
 'Atticus','Balbus','Celadus','Decimus','Eumenes','Fortis','Gallus','Herminius','Spiculus','Tetraites',
@@ -650,7 +650,7 @@ class Fighter {
     if(this.state==='roll'){
       // esquive parfaite : ouvre une fenêtre de contre-attaque
       this.counterT=1.0;
-      addFloater(this.x, GROUND-160, 'esquive parfaite !', '#9fd8ff');
+      addFloater(this.x, GROUND-160+this.y, 'esquive parfaite !', '#9fd8ff');
       return;
     }
     const facingOk = Math.sign(from.x - this.x) === this.facing;
@@ -673,8 +673,8 @@ class Fighter {
           sfx.shatter();
         }
       }
-      if(!bg) this.counterT=1.0;   // une parade réussie ouvre la fenêtre de contre
-      addFloater(this.x, GROUND-140, bg?'garde brisée !':'paré ! riposte ouverte', bg?'#ffb347':'#ffe97a');
+      if(!bg && this.classe==='bouclier') this.counterT=1.0;   // seul le Murmillo contre à la parade
+      addFloater(this.x, GROUND-140, bg?'garde brisée !':(this.counterT>0?'paré ! riposte ouverte':'paré !'), bg?'#ffb347':'#ffe97a');
       addFloater(this.x, GROUND-115, '-'+taken, '#ffd0d0');
       sparks(this.x+this.facing*30, GROUND-100, '#ffe97a', 8);
       sfx.block();
@@ -895,7 +895,7 @@ class Fighter {
       else if(this.state==='walk') this.state='idle';
     }
     this.x=Math.max(60, Math.min(W-60, this.x));
-    if(this.isAI) this.updateAI(dt, foe);
+    if(this.isAI){ this.updateAI(dt, foe); this.x=Math.max(60, Math.min(W-60, this.x)); }
   }
   updateAI(dt, foe){
     if(this.dead||foe.dead||this.st.stun>0){ this.aiMove=0; this.blocking=false; if(this.st.stun>0)this.crouch=false; return; }
