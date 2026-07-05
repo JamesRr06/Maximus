@@ -229,6 +229,23 @@ eval(src + `;(${function(){
   for(let i=0;i<60 && enemy.eqv.casque>0;i++){ enemy.state='idle'; enemy.hp=500; enemy.st.stun=0; enemy.takeHit(20, player, 'high'); }
   check('casque de l IA arraché (disparaît du visuel)', enemy.eqv.casque===0);
 
+  /* ---- multijoueur local ---- */
+  game.vsP1='bouclier'; game.vsP2='double'; game.mode='versus';
+  startVersus();
+  check('duel local : deux combattants humains', !player.isAI && !player2.isAI && enemy===player2);
+  check('duel local : J2 pilotée à la manette', player2.padIdx===0);
+  drawMode(1); drawVsSetup(1); drawVsEnd(1);
+  check('écrans multi : rendu sans erreur', true);
+  game.mode='coop'; game.coopOn=true; game.coopClasse='double'; game.coopHue=330;
+  run=newRun('Duo'); run.level=1; startFight();
+  check('coop : Joueur 2 présent (manette)', !!player2 && player2.padIdx===0 && player2.classe==='double');
+  check('coop : toujours deux IA en face', !!enemy2);
+  check('coop : dégâts IA réduits (×0,8)', Math.abs(enemy.dmgMult - makeEnemy(1).dmgMult*.8) < .01);
+  enemy.hp=0; enemy.die(); enemy2.hp=0; enemy2.die(); endFight(true);
+  check('coop : pas de mécanique victoire parfaite', run.flawless===false);
+  game.mode='solo'; game.coopOn=false; player2=null;
+  check('manette absente : padList vide et sans erreur', padList().length===0);
+
   /* ---- boss : compétences spéciales ---- */
   run=newRun('T'); run.level=10; startFight();
   enemy.spT=0.01;

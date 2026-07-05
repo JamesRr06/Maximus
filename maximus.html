@@ -232,7 +232,9 @@ let menuMusic = null;
 function updateMusic(){
   if(typeof Audio === 'undefined' || !MUSIC_SRC) return;
   if(!menuMusic){ menuMusic = new Audio(MUSIC_SRC); menuMusic.loop = true; }
-  const enMenu = game.screen!=='fight' && game.screen!=='quit';
+  const MENU_SCREENS=['title','nom','mode','classe','couleur','scores','tutoriel','vsSetup','coopJoin'];
+  const enMenu = MENU_SCREENS.includes(game.screen)
+    || (game.screen==='options' && game.optionsFrom!=='pause');
   menuMusic.volume = Math.max(0, Math.min(1, VOL()*.3)) * (saveData.music?1:0);
   if(enMenu && saveData.music && VOL()>0){
     if(menuMusic.paused) menuMusic.play().catch(()=>{});
@@ -275,6 +277,76 @@ const GFXP = {
   high:  {part:1,  shadows:true,  crowdAnim:true,  detail:true,  nom:'ÉLEVÉ'},
 };
 function GFX(){ return GFXP[saveData.gfx]||GFXP.high; }
+/* ============ MANETTE (Xbox / Gamepad API standard) ============
+   Combat : stick/croix = bouger · A saut · X attaque · B esquive · LB roulade
+   RB lancer · Y ulti · RT (maintenu) garde / coup de main gauche · Start pause.
+   Menus : le stick déplace un curseur, A clique, B revient. */
+const pads = {prev:{}, cursor:{x:W/2, y:H/2, active:false}};
+function padList(){
+  return (typeof navigator!=='undefined' && navigator.getGamepads)
+    ? [...navigator.getGamepads()].filter(p=>p && p.connected) : [];
+}
+function padBtn(p,i){ return !!(p.buttons[i] && p.buttons[i].pressed); }
+function padAxisX(p){
+  let v=p.axes[0]||0;
+  if(padBtn(p,14)) v=-1; if(padBtn(p,15)) v=1;
+  return Math.abs(v)>.25 ? v : 0;
+}
+function padCrouch(p){ return padBtn(p,13) || (p.axes[1]||0)>.5; }
+function padPressed(p,i){
+  const key=p.index+':'+i, now=padBtn(p,i), was=pads.prev[key]||false;
+  pads.prev[key]=now;
+  return now && !was;
+}
+function padFighterFor(idx){
+  // en multi, la manette 0 contrôle le Joueur 2 ; en solo elle contrôle le joueur
+  if(game.mode==='versus' || game.mode==='coop') return idx===0 ? player2 : null;
+  return player;
+}
+function updatePads(){
+  for(const p of padList()){
+    const f=padFighterFor(p.index);
+    const enCombat = game.screen==='fight' && !game.paused;
+    if(enCombat && f && !f.dead){
+      if(padPressed(p,9)){ game.paused=true; continue; }
+      if(padPressed(p,0)) f.jump();
+      if(padPressed(p,2)) f.startAttack();
+      if(padPressed(p,1)){ const d=padAxisX(p); f.startDash(d?Math.sign(d):-f.facing); }
+      if(padPressed(p,4)){ const d=padAxisX(p); f.startRoll(d?Math.sign(d):-f.facing); }
+      if(padPressed(p,5)) f.startThrow();
+      if(padPressed(p,3)) f.activateUlti();
+      const rt = (p.buttons[7] && (p.buttons[7].value>.4 || p.buttons[7].pressed)) || padBtn(p,6);
+      if(f.classe==='double'){ if(padPressed(p,7)) f.startAttack(null,true); }
+      else {
+        if(rt && !f.busy && f.canBlock() && !f.airborne && f.st.stun<=0) f.blocking=true;
+        else if(!rt && f.padBlock) f.blocking=false;
+        f.padBlock=rt;
+      }
+    } else {
+      // curseur virtuel dans les menus / la pause
+      pads.cursor.active=true;
+      const ax=Math.abs(p.axes[0]||0)>.25?(p.axes[0]||0):0, ay=Math.abs(p.axes[1]||0)>.25?(p.axes[1]||0):0;
+      pads.cursor.x=Math.max(0,Math.min(W,pads.cursor.x+ax*11+(padBtn(p,15)?8:0)-(padBtn(p,14)?8:0)));
+      pads.cursor.y=Math.max(0,Math.min(H,pads.cursor.y+ay*11+(padBtn(p,13)?8:0)-(padBtn(p,12)?8:0)));
+      game.mouse={x:pads.cursor.x, y:pads.cursor.y};
+      if(padPressed(p,0)){
+        for(const c of game.cards){
+          if(pads.cursor.x>=c.x && pads.cursor.x<=c.x+c.w && pads.cursor.y>=c.y && pads.cursor.y<=c.y+c.h){ c.action(); break; }
+        }
+      }
+      if(padPressed(p,1)) handleKey({code:'Escape', key:'Escape'});
+      if(padPressed(p,9) && game.screen==='fight') game.paused=false;
+    }
+  }
+}
+function drawPadCursor(){
+  const c=pads.cursor;
+  ctx.strokeStyle='#f5c542'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(c.x,c.y,9,0,7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c.x-14,c.y); ctx.lineTo(c.x+14,c.y);
+  ctx.moveTo(c.x,c.y-14); ctx.lineTo(c.x,c.y+14); ctx.stroke();
+}
+
 /* OPTIMISATION : dégradés réutilisés d'une frame à l'autre (leur création est coûteuse) */
 const gradCache = new Map();
 function cachedGrad(key, y0, y1, c0, c1){
@@ -305,6 +377,7 @@ let game = {
   perkChoices: null,            // 3 perks proposés après une victoire
   mouse: {x:0, y:0},
   paused: false, rebind: null,
+  mode: 'solo', vsP1: 'bouclier', vsP2: 'double', coopOn: false,
   optionsFrom: 'title', shopReturn: 'next',
   koTimer: 0, newUnlock: null, lastGold: 0,
 };
@@ -677,8 +750,20 @@ class Fighter {
     else {
       let mv=0;
       if(this.isAI) mv=this.aiMove;
-      else mv = (held('right')?1:0)-(held('left')?1:0);
-      if(!this.isAI) this.crouch = !this.airborne && this.st.stun<=0 && held('crouch');
+      else if(this.padIdx!=null){
+        const p=padList().find(q=>q.index===this.padIdx);
+        mv = p ? padAxisX(p) : 0;
+        this.crouch = !this.airborne && this.st.stun<=0 && !!(p && padCrouch(p));
+      } else {
+        mv = (held('right')?1:0)-(held('left')?1:0);
+        let cr = held('crouch');
+        // en solo, la manette peut aussi piloter le joueur clavier
+        if(!player2){
+          const p=padList().find(q=>q.index===0);
+          if(p){ const pm=padAxisX(p); if(pm) mv=pm; if(padCrouch(p)) cr=true; }
+        }
+        this.crouch = !this.airborne && this.st.stun<=0 && cr;
+      }
       if(this.st.stun>0) mv=0;
       if(this.blocking) mv*=.3;
       if(this.crouch) mv*=.45;
@@ -876,6 +961,10 @@ function handleKey(e){
   if(S==='couleur' && code==='Escape'){ game.screen='classe'; return; }
   if(S==='select' && code==='Escape' && run && run.wins===0){ game.screen='couleur'; return; }
   if(S==='stats' && code==='Escape'){ game.screen=game.statsFrom||'select'; return; }
+  if(S==='mode' && code==='Escape'){ game.screen='title'; return; }
+  if(S==='vsSetup' && code==='Escape'){ game.screen='mode'; return; }
+  if(S==='coopJoin' && code==='Escape'){ game.screen='couleur'; return; }
+  if(S==='vsEnd' && code==='Escape'){ game.mode='solo'; player2=null; game.screen='title'; return; }
   if(S==='fight'){
     if(pressed('pause', e)){ game.paused=!game.paused; return; }
     if(game.paused) return;
@@ -910,8 +999,17 @@ function advance(){ // écrans sans cartes → continuer
 }
 
 /* ============ DÉROULEMENT ============ */
-let player=null, enemy=null, enemy2=null;   // enemy2 : duel à deux après une victoire parfaite
-function fightersAll(){ return enemy2 ? [player,enemy,enemy2] : [player,enemy]; }
+let player=null, enemy=null, enemy2=null, player2=null;   // player2 : duel local ou duo coop
+function fightersAll(){
+  const l=[player, enemy];
+  if(enemy2) l.push(enemy2);
+  if(player2 && player2!==enemy) l.push(player2);
+  return l.filter(Boolean);
+}
+function nearestOf(list, x){
+  const v=list.filter(f=>f && !f.dead);
+  return v.length ? v.reduce((a,b)=>Math.abs(a.x-x)<=Math.abs(b.x-x)?a:b) : (list[0]||null);
+}
 let shieldDrops=[];   // boucliers lâchés au sol {x, owner}
 let spears=[];        // lances en vol {x, y, vx, vy, w, owner}
 let spearDrops=[];    // lances plantées {x, w, owner}
@@ -919,9 +1017,12 @@ function updateSpears(dt){
   for(const s of spears){
     s.x += s.vx*dt; s.y += s.vy*dt; s.vy += (s.type==='hache'?560:420)*dt;
     s.spin = (s.spin||0) + dt*(s.type==='couteau'?16:(s.type==='hache'?11:0));
-    const cible = s.owner===player
-      ? (enemy2 && !enemy2.dead && (enemy.dead || Math.abs(s.x-enemy2.x)<Math.abs(s.x-enemy.x)) ? enemy2 : enemy)
-      : player;
+    const estJoueur = s.owner===player || s.owner===player2;
+    const cible = game.mode==='versus'
+      ? (s.owner===player ? player2 : player)
+      : (estJoueur
+          ? (nearestOf([enemy,enemy2].filter(Boolean), s.x) || enemy)
+          : (nearestOf([player,player2].filter(Boolean), s.x) || player));
     if(!cible.dead && Math.abs(s.x-cible.x)<36 && s.y>GROUND-165+cible.y && s.y<GROUND+30+cible.y){
       s.owner.aw=s.w;   // pour le calcul brise-garde et les effets d'arme
       cible.takeHit(Math.round(s.w.dmg*(s.mult||1.6)*s.owner.dmgMult), s.owner, 'mid');
@@ -1304,14 +1405,26 @@ function gotoSelect(){
 function startFight(){
   const e=makeEnemy(run.level);
   player=new Fighter(240, 1, run.weapon, playerOpts());
-  // victoire parfaite au combat précédent → DEUX adversaires (dégâts réduits de 33 %)
-  const duo = !!run.flawless;
+  // victoire parfaite → DEUX adversaires (dégâts ×0,67) · coop → TOUJOURS deux (dégâts ×0,8)
+  const coop = game.mode==='coop' && game.coopOn;
+  const duo = coop || !!run.flawless;
+  const dmgScale = coop ? .8 : (duo ? .67 : 1);
   const mkE = (x, suffix, hueShift) => new Fighter(x, -1, e.weapon,
-    {hp:e.hp, stam:100, speed:e.speed, dmgMult:e.dmgMult*(duo?.67:1), armorFlat:e.armor,
+    {hp:e.hp, stam:100, speed:e.speed, dmgMult:e.dmgMult*dmgScale, armorFlat:e.armor,
      ai:e, hue:(e.hue+hueShift)%360, stunCh:e.boss?.12:0, classe:e.classe, eqv:e.eqv,
      name:e.name+suffix+(e.boss?' ★':'')});
   enemy = mkE(duo?640:720, '', 0);
   enemy2 = duo ? mkE(810, ' II', 140) : null;
+  // Joueur 2 (manette) en coop : mêmes stats de lignée, sa classe et sa couleur
+  if(coop){
+    const saveCl=run.classe, saveHue=run.hue;
+    run.classe=game.coopClasse||saveCl; run.hue=game.coopHue!==undefined?game.coopHue:330;
+    const o2=playerOpts(); o2.name='JOUEUR 2';
+    run.classe=saveCl; run.hue=saveHue;
+    const t2=TREES[o2.classe], u2=Object.keys(t2).filter(k=>t2[k]<=run.wins);
+    player2=new Fighter(330, 1, u2[u2.length-1]||Object.keys(t2)[0], o2);
+    player2.padIdx=0;
+  } else if(game.mode!=='versus'){ player2=null; }
   shieldDrops=[]; spears=[]; spearDrops=[];
   traps=[]; trapTimer=trapDelay()+2;   // premier piège un peu retardé
   game.floaters=[]; game.particles=[]; game.koTimer=0; game.newUnlock=null;
@@ -1330,7 +1443,7 @@ function endFight(win){
     run.gold=(run.gold||0)+g; game.lastGold=g;
     // victoire parfaite (aucun PV perdu) → le prochain combat sera un duel à deux ;
     // après un duel à deux, la mécanique est remise à zéro
-    run.flawless = wasDouble ? false : !player.tookDamage;
+    run.flawless = (game.mode==='coop') ? false : (wasDouble ? false : !player.tookDamage);
     run.pendingPerks = rollPerks();   // persisté : le perk n'est pas perdu si on ferme le jeu ici
     game.bossUlti = !!(enemy.ai && enemy.ai.boss);
     if(game.bossUlti) run.ulti = true;   // chaque boss vaincu recharge l'ulti (un usage)
@@ -1873,6 +1986,12 @@ function drawHUD(){
     ctx.fillText(enemy2.name, W-30, 124);
     bar(W-330,128,300,10,enemy2.hp/enemy2.maxHp,'#d33','#3a1010',true);
   }
+  if(player2 && game.mode==='coop'){ // Joueur 2 à gauche
+    ctx.textAlign='left'; ctx.fillStyle='hsl('+player2.hue+',70%,62%)'; ctx.font='bold 12px Georgia';
+    ctx.fillText(player2.name+' (manette)', 30, 130);
+    bar(30,134,300,10,player2.hp/player2.maxHp,'#d33','#3a1010',false);
+    bar(30,147,300,6,player2.stam/player2.maxStam,'#e9c34a','#3a3010',false);
+  }
   // statuts actifs
   const stTxt = f=>{ const s=[]; if(f.st.stun>0)s.push('étourdi'); if(f.st.slow>0)s.push('ralenti');
     if(f.st.bleedT>0)s.push('saignement'); if(f.st.regenT>0)s.push('récupération'); if(f.st.blind>0)s.push('aveuglé'); return s.join(' · '); };
@@ -1931,7 +2050,7 @@ function drawTitle(t){
     game.cards.push({x:bx,y,w:260,h:44,action});
     y+=52;
   };
-  menuBtn('JOUER', '#fff', ()=>{ game.nameInput=saveData.name||'Maximus'; game.screen='nom'; });
+  menuBtn('JOUER', '#fff', ()=>{ game.screen='mode'; });
   if(saveData.run && !saveData.run.dead && saveData.run.wins>0)
     menuBtn('REPRENDRE '+saveData.run.name.toUpperCase()+' ('+(saveData.run.wins+1)+'/'+MAX_LEVEL+')', '#7ee787',
       ()=>{run=migrateRun(saveData.run); run.level=run.wins+1; gotoSelect();});
@@ -1949,6 +2068,115 @@ function drawQuit(t){
   ctx.fillStyle='#0a0503'; ctx.fillRect(0,0,W,H);
   title('AVE ATQUE VALE', 240, 40, '#f5c542');
   title('Tu peux fermer cette fenêtre.', 290, 18, '#ccc');
+}
+function drawMode(t){
+  drawArena(t); overlay(.62); game.cards=[];
+  backBtn(()=>{ game.screen='title'; });
+  title('MODE DE JEU', 96, 34, '#f5c542');
+  const defs=[
+    ['SOLO', 'La lignée roguelike : '+MAX_LEVEL+' combats, une seule vie.', '#fff',
+      ()=>{ game.mode='solo'; game.coopOn=false; player2=null; game.nameInput=saveData.name||'Maximus'; game.screen='nom'; }],
+    ['DUEL LOCAL — 1 contre 1', 'Joueur 1 (clavier & souris) contre Joueur 2 (manette).', '#ff9c9c',
+      ()=>{ game.mode='versus'; game.screen='vsSetup'; }],
+    ['DUO contre l’IA', 'La lignée à deux : J2 à la manette — toujours 2 adversaires en face.', '#7ee787',
+      ()=>{ game.mode='coop'; game.coopOn=true; player2=null; game.nameInput=saveData.name||'Maximus'; game.screen='nom'; }],
+  ];
+  defs.forEach((d,i)=>{
+    const x=W/2-260, y=150+i*96, w=520, hh=78;
+    card(x,y,w,hh, hover(x,y,w,hh));
+    title(d[0], y+32, 22, d[2]);
+    title(d[1], y+58, 14, '#ccc');
+    game.cards.push({x,y,w,h:hh,action:d[3]});
+  });
+  if(!padList().length)
+    title('Branche une manette Xbox pour les modes à deux joueurs.', 470, 14, '#999');
+  else
+    title('Manette détectée ✓', 470, 14, '#7ee787');
+}
+function drawVsSetup(t){
+  drawArena(t); overlay(.62); game.cards=[];
+  backBtn(()=>{ game.screen='mode'; });
+  title('DUEL LOCAL', 76, 32, '#f5c542');
+  const noms={bouclier:'Murmillo', deuxmains:'Secutor lourd', double:'Dimachaerus'};
+  const côtés=[
+    ['JOUEUR 1 — clavier & souris', '#9fd8ff', 'vsP1', 120],
+    ['JOUEUR 2 — manette', '#ff9c9c', 'vsP2', 520],
+  ];
+  for(const [titre, col, champ, x0] of côtés){
+    title2(titre, x0+160, 126, 15, col);
+    Object.keys(CLASSES).forEach((k,i)=>{
+      const x=x0, y=150+i*74, w=320, hh=64;
+      const sel = game[champ]===k;
+      card(x,y,w,hh, sel||hover(x,y,w,hh));
+      fitText(noms[k], x+w/2, y+27, w-20, 17, sel?'#ffe9a0':'#ddd', true);
+      fitText(CLASSES[k].sub, x+w/2, y+48, w-20, 12, '#aaa');
+      game.cards.push({x,y,w,h:hh,action:()=>{ game[champ]=k; }});
+    });
+  }
+  const ok = padList().length>0;
+  const bx=W/2-130, by=410;
+  card(bx,by,260,48, ok&&hover(bx,by,260,48));
+  title(ok?'COMBATTRE !':'MANETTE REQUISE', by+31, 17, ok?'#fff':'#886');
+  if(ok) game.cards.push({x:bx,y:by,w:260,h:48,action:startVersus});
+  title('Arène II · pièges actifs · mêmes armes de référence pour les deux camps', 486, 13, '#999');
+}
+function startVersus(){
+  if(!run) run=newRun('DUEL');
+  run.level=15;   // arène II, pièges actifs, décor sympa
+  run.equip=Object.assign({}, EQUIP_ZERO, {casque:3, cuirasse:3, vitesse:2, bouclier:3, arme:2});
+  run.dura={casque:duraMax(3), cuirasse:duraMax(3)};
+  run.ulti=false; run.flawless=false;
+  const armes={bouclier:'gladius', deuxmains:'spathaL', double:'gladii'};
+  const mk=(x,facing,classe,hue,nom,pad)=>{
+    const wgt = classe==='double'?0:(classe==='deuxmains'?2:1);
+    const f=new Fighter(x,facing,armes[classe],{
+      hp:150, stam:115, speed:230, dmgMult:1.15, armorFlat:3, dmgTakenMult:.95,
+      shieldMax:110, jumpV:[645,560,505][wgt], jumpCost:[7,8,10][wgt],
+      rollCost:[20,24,30][wgt], dashCost:[10,12,15][wgt], rollBoost:1.05, dashBoost:1.05,
+      atkSpd:.93, stunCh:.05, riposte:classe==='bouclier'?.2:0,
+      player:true, hue, classe, name:nom});
+    f.padIdx=pad;
+    return f;
+  };
+  player  = mk(240, 1, game.vsP1, 210, 'JOUEUR 1', null);
+  player2 = mk(720,-1, game.vsP2, 0,   'JOUEUR 2', 0);
+  enemy = player2; enemy2 = null;   // la boucle 1c1 réutilise l'adversaire humain
+  shieldDrops=[]; spears=[]; spearDrops=[]; traps=[]; trapTimer=trapDelay()+2;
+  game.floaters=[]; game.particles=[]; game.koTimer=0; game.vsWinner=null;
+  game.screen='fight'; game.msg='DUEL LOCAL — que le meilleur gagne !'; game.msgT=2.4;
+}
+function drawVsEnd(t){
+  overlay(.6); game.cards=[];
+  title(game.vsWinner ? game.vsWinner+' L’EMPORTE !' : 'DOUBLE KO !', 200, 44, '#f5c542');
+  const bx=W/2-130;
+  card(bx,290,260,46, hover(bx,290,260,46));
+  title('REVANCHE', 319, 18, '#fff');
+  game.cards.push({x:bx,y:290,w:260,h:46,action:startVersus});
+  card(bx,348,260,46, hover(bx,348,260,46));
+  title('MENU', 377, 16, '#ddd');
+  game.cards.push({x:bx,y:348,w:260,h:46,action:()=>{ game.mode='solo'; player2=null; game.screen='title'; }});
+}
+function drawCoopJoin(t){
+  drawArena(t); overlay(.62); game.cards=[];
+  backBtn(()=>{ game.screen='couleur'; });
+  title('JOUEUR 2 — MANETTE', 84, 30, '#f5c542');
+  const ok = padList().length>0;
+  title(ok ? 'Manette détectée ✓ — choisis la classe du Joueur 2' : 'Branche une manette Xbox...', 122, 15, ok?'#7ee787':'#ff9c9c');
+  const noms={bouclier:'Murmillo', deuxmains:'Secutor lourd', double:'Dimachaerus'};
+  Object.keys(CLASSES).forEach((k,i)=>{
+    const x=W/2-160, y=150+i*74, w=320, hh=64;
+    const sel = (game.coopClasse||run.classe)===k;
+    card(x,y,w,hh, sel||hover(x,y,w,hh));
+    fitText(noms[k], x+w/2, y+27, w-20, 17, sel?'#ffe9a0':'#ddd', true);
+    fitText(CLASSES[k].sub, x+w/2, y+48, w-20, 12, '#aaa');
+    game.cards.push({x,y,w,h:hh,action:()=>{ game.coopClasse=k; }});
+  });
+  game.coopHue = game.coopHue!==undefined ? game.coopHue : 330;
+  const bx=W/2-130, by=414;
+  card(bx,by,260,48, ok&&hover(bx,by,260,48));
+  title(ok?'EN AVANT, DUO !':'MANETTE REQUISE', by+31, 17, ok?'#fff':'#886');
+  if(ok) game.cards.push({x:bx,y:by,w:260,h:48,action:()=>{ game.coopClasse=game.coopClasse||run.classe; gotoSelect(); }});
+  title('Les perks, l’or et l’équipement de la lignée profitent aux deux gladiateurs.', 488, 13, '#999');
 }
 function drawNom(t){
   drawArena(t); overlay(.6); game.cards=[];
@@ -2027,7 +2255,7 @@ function drawCouleur(t){
   const bx=W/2-110, by=430;
   card(bx,by,220,46, hover(bx,by,220,46));
   title('COMMENCER', by+30, 18, '#fff');
-  game.cards.push({x:bx,y:by,w:220,h:46,action:gotoSelect});
+  game.cards.push({x:bx,y:by,w:220,h:46,action:()=>{ if(game.mode==='coop') game.screen='coopJoin'; else gotoSelect(); }});
 }
 function drawSelect(t){
   drawArena(t); overlay(.6); game.cards=[];
@@ -2402,22 +2630,26 @@ function frame(now){
   let dt=Math.min(.033,(now-last)/1000); last=now;
   game.time+=dt; const t=game.time;
   if(game.screen!==game._lastScreen){ game._lastScreen=game.screen; game.screenAt=game.time; updateMusic(); }
+  updatePads();
   if(game.slowmo>0){ game.slowmo-=dt; dt*=.35; }
 
   if(game.screen==='fight' && !game.paused){
     game.msgT-=dt;
-    // cible du joueur : l'adversaire vivant le plus proche
-    const adversaires = enemy2 ? [enemy, enemy2] : [enemy];
-    const vivants = adversaires.filter(f=>!f.dead);
-    const cible = vivants.length
-      ? vivants.reduce((a,b)=>Math.abs(a.x-player.x)<=Math.abs(b.x-player.x)?a:b)
-      : enemy;
-    player.update(dt, cible, adversaires);
-    for(const f of adversaires) f.update(dt, player);
+    if(game.mode==='versus'){
+      // duel local : les deux joueurs se combattent
+      player.update(dt, player2, [player2]);
+      player2.update(dt, player, [player]);
+    } else {
+      const joueurs = (player2 && game.mode==='coop') ? [player, player2] : [player];
+      const adversaires = enemy2 ? [enemy, enemy2] : [enemy];
+      for(const j of joueurs) j.update(dt, nearestOf(adversaires, j.x)||enemy, adversaires);
+      for(const f of adversaires) f.update(dt, nearestOf(joueurs, f.x)||player, joueurs);
+    }
     updateTraps(dt);
     // séparation des corps (toutes les paires)
-    const paires = enemy2 ? [[player,enemy],[player,enemy2],[enemy,enemy2]] : [[player,enemy]];
-    for(const [A,B] of paires){
+    const tousF=fightersAll();
+    for(let i=0;i<tousF.length;i++) for(let j=i+1;j<tousF.length;j++){
+      const A=tousF[i], B=tousF[j];
       if(!A.dead && !B.dead){
         const dx=B.x-A.x;
         if(Math.abs(dx)<42 && Math.abs(B.y-A.y)<50){
@@ -2435,10 +2667,21 @@ function frame(now){
       }
     }
     updateSpears(dt);
-    const foesDead = enemy.dead && (!enemy2 || enemy2.dead);
-    if(player.dead || foesDead){
-      game.koTimer+=dt;
-      if(game.koTimer>1.6) endFight(!player.dead && foesDead);
+    if(game.mode==='versus'){
+      if(player.dead || player2.dead){
+        game.koTimer+=dt;
+        if(game.koTimer>1.6){
+          game.vsWinner = player.dead ? (player2.dead?null:player2.name) : player.name;
+          game.screen='vsEnd';
+        }
+      }
+    } else {
+      const foesDead = enemy.dead && (!enemy2 || enemy2.dead);
+      const playersDead = (game.mode==='coop' && player2) ? (player.dead && player2.dead) : player.dead;
+      if(playersDead || foesDead){
+        game.koTimer+=dt;
+        if(game.koTimer>1.6) endFight(!playersDead && foesDead);
+      }
     }
   }
   game.floaters.forEach(f=>{f.t+=dt; f.y-=dt*45;});
@@ -2454,6 +2697,10 @@ function frame(now){
   if(game.shake>0) ctx.translate((Math.random()-.5)*game.shake,(Math.random()-.5)*game.shake);
   const S=game.screen;
   if(S==='title') drawTitle(t);
+  else if(S==='mode') drawMode(t);
+  else if(S==='vsSetup') drawVsSetup(t);
+  else if(S==='vsEnd') drawVsEnd(t);
+  else if(S==='coopJoin') drawCoopJoin(t);
   else if(S==='nom') drawNom(t);
   else if(S==='quit') drawQuit(t);
   else if(S==='scores') drawScores(t);
@@ -2497,6 +2744,7 @@ function frame(now){
     else if(game.paused) drawPause(t);
     else game.cards=[];
   }
+  if(pads.cursor.active && (S!=='fight' || game.paused)) drawPadCursor();
   ctx.restore();
   requestAnimationFrame(frame);
 }
