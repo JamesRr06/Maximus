@@ -22,11 +22,14 @@ SYSTÈMES
 DPS équilibrés par palier et effets d'état distincts (saignement, perce-armure,
 enchevêtrement, fente d'armure, étourdissement). Perks par classe après chaque
 victoire, or et boutique de matériel, ulti de classe, contre sur parade ou
-roulade parfaite, victoire parfaite = duel à deux (dégâts ennemis -33 %),
+roulade parfaite, victoire parfaite = +25 % d'or, duels 1 contre 2 aléatoires
+à partir du niveau 30,
 arènes évolutives avec pièges (piques, flaques, lions, et tomates/pierres du
-public près des bords aux niveaux 31-40), IA adaptative qui lance ses armes.
+public près des bords aux niveaux 31-40), IA adaptative qui lance et ramasse les armes. Manette Xbox : combat complet
+et menus navigables aux boutons (croix/stick, A valide, B revient). Modes
+locaux Duel 1v1 et Duo contre l'IA.
 
 DÉVELOPPEMENT
 -------------
-node tests.js .......... lance les 82 tests de régression sur maximus.html
+node tests.js .......... lance les 108 tests de régression sur maximus.html
 tests.js accepte un chemin en argument pour tester un autre build.

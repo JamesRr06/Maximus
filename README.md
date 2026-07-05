@@ -52,7 +52,7 @@ Au premier lancement de l'exe, Windows SmartScreen peut demander confirmation
 ## Développement
 
 Le jeu tient dans `maximus.html` : JavaScript pur + Canvas 2D + Web Audio, zéro
-dépendance. `tests.js` contient 82 tests de régression exécutables hors navigateur :
+dépendance. `tests.js` contient 108 tests de régression exécutables hors navigateur :
 
 ```bash
 node tests.js            # teste maximus.html du dossier

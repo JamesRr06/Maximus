@@ -311,6 +311,35 @@ eval(src + `;(${function(){
   for(let i=0;i<12;i++){ run.wins=i; pushScore(run); }
   check('scores plafonnés à 10, triés', saveData.scores.length===10 && saveData.scores[0].w===11);
 
+  // ---- manette : navigation des menus par boutons ----
+  game.cards=[
+    {x:100,y:200,w:100,h:100,action(){ this.hit='g'; }},
+    {x:300,y:200,w:100,h:100,action(){ padHit='milieu'; }},
+    {x:500,y:200,w:100,h:100,action(){ padHit='droite'; }},
+    {x:300,y:400,w:100,h:100,action(){ padHit='bas'; }},
+  ];
+  let padHit='';
+  pads.sel=0; pads.dirPrev={};
+  padMoveSel(1,0);  check('manette : droite → carte voisine', pads.sel===1);
+  padMoveSel(0,1);  check('manette : bas → carte du dessous', pads.sel===3);
+  padMoveSel(0,-1); check('manette : haut → retour', pads.sel===1);
+  padMoveSel(-1,0); padMoveSel(-1,0);
+  check('manette : butée à gauche', pads.sel===0);
+  const fakePad={index:0, axes:[.9,0], buttons:Array.from({length:16},()=>({pressed:false,value:0}))};
+  pads.dirPrev={};
+  check('manette : stick = une impulsion, pas de rafale', padDir(fakePad,'x')===1 && padDir(fakePad,'x')===0 && padDir(fakePad,'x')===0);
+  fakePad.axes[0]=0; padDir(fakePad,'x'); fakePad.axes[0]=.9;
+  check('manette : nouvelle impulsion après retour au neutre', padDir(fakePad,'x')===1);
+  pads.sel=1; game.cards[1].action();
+  check('manette : A valide le bouton sélectionné', padHit==='milieu');
+  game.cards=[];
+
+  // ---- sélection d'armes : icônes dessinées sans erreur ----
+  for(const k of Object.keys(WEAPONS)) drawWeaponIcon(k, 60, 60, 62);
+  check('icônes d’armes : les 19 se dessinent', true);
+  run=newRun('R'); run.level=1; game.screen='select'; drawSelect(1.0);
+  check('écran de sélection épuré : rendu + cartes', game.cards.length>0);
+
   run=newRun('R'); run.level=1; startFight();
   for(const gq of ['low','medium','high']){
     saveData.gfx=gq;
