@@ -166,15 +166,36 @@ eval(src + `;(${function(){
   player.jump();
   check('saut refusé sans endurance', player.y===0);
 
-  /* ---- victoire parfaite → duel à deux, puis remise à zéro ---- */
+  /* ---- combat parfait : +25 % d'or ---- */
   run=newRun('T'); run.level=1; startFight();
   enemy.hp=0; enemy.die(); endFight(true);
-  check('victoire parfaite détectée', run.flawless===true);
-  nextFightPrep(); startFight();
-  check('duel à deux avec dégâts réduits', !!enemy2 && enemy.dmgMult < makeEnemy(run.level).dmgMult);
-  enemy.hp=0; enemy.die(); enemy2.hp=0; enemy2.die(); endFight(true);
-  nextFightPrep(); startFight();
-  check('retour à un adversaire, mécanique remise à zéro', enemy2===null && run.flawless===false);
+  const orParfait=game.lastGold;
+  run=newRun('T'); run.level=1; startFight();
+  player.tookDamage=true; enemy.hp=0; enemy.die(); endFight(true);
+  check('combat parfait : +25 % d’or', orParfait===Math.round(game.lastGold*1.25) && game.lastPerfect===false);
+  /* ---- duels 1 c. 2 aléatoires dès le niveau 30 ---- */
+  game.mode='solo'; game.coopOn=false;
+  let sawDuo=false, sawSolo=false, armesOK=true;
+  for(let s=0;s<40;s++){
+    run=newRun('T'); run.seed=s*4241+9; run.level=33; startFight();
+    if(enemy2){
+      sawDuo=true;
+      if(enemy2.weaponKey===enemy.weaponKey) armesOK=false;
+      if(Math.abs(enemy.dmgMult - makeEnemy(33).dmgMult*.75)>.01) armesOK=false;
+    } else sawSolo=true;
+  }
+  check('1 c. 2 aléatoire après le niveau 30 (les deux issues existent)', sawDuo && sawSolo);
+  check('duo niv 30+ : armes différentes, dégâts ×0,75', armesOK);
+  run=newRun('T'); run.level=10; startFight();
+  check('jamais de 1 c. 2 avant le niveau 30 (hors coop)', enemy2===null);
+  /* ---- poings réduits mais boostés par les multiplicateurs ---- */
+  check('poings affaiblis (3 dégâts de base)', FISTS.dmg===3);
+  /* ---- ramassage universel des armes au sol ---- */
+  run=newRun('T'); run.wins=7; run.weapon='gladius'; run.level=1; startFight();
+  spearDrops.push({x:player.x, w:WEAPONS.hasta, owner:enemy});
+  player.thrown=true; player.baseW=player.w; player.w=FISTS; player.state='idle'; player.y=0;
+  updateSpears(1/60);
+  check('le joueur ramasse l’arme d’un ennemi', !player.thrown && player.w===WEAPONS.hasta);
 
   /* ---- cooldown commun esquive/roulade (1 s) ---- */
   player.startRoll(1);

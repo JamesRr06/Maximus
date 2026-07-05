@@ -65,7 +65,7 @@ Object.assign(WEAPONS, {
 });
 const WKEYS = Object.keys(WEAPONS);
 /* poings nus : arme de secours quand on a lancé sa lance */
-const FISTS = {nom:'Poings', desc:'', range:44, dmg:5, windup:140, active:80, recover:160, stam:6, color:'#e3b98a', len:0, fists:true};
+const FISTS = {nom:'Poings', desc:'', range:42, dmg:3, windup:140, active:80, recover:170, stam:6, color:'#e3b98a', len:0, fists:true};
 
 /* ============ CLASSES DE COMBAT ============ */
 const CLASSES = {
@@ -124,6 +124,10 @@ const NAMES = ['Marcus','Brutus Minor','Cassius','Drusus','Felix','Gaius','Hostu
 const MAX_LEVEL = 40;
 /* PRNG déterministe : l'adversaire d'un niveau est aléatoire mais stable pour une lignée donnée */
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function duoAtLevel(lvl){
+  if(game.mode==='coop') return true;
+  return lvl>=30 && mulberry32(((run&&run.seed)||0) + lvl*104729)() < .35;
+}
 function makeEnemy(lvl){
   const i = lvl-1, boss = (lvl%10===0);
   const rng = mulberry32(((run&&run.seed)?run.seed:987654) + lvl*7919);
@@ -226,7 +230,7 @@ function crowdCheer(dur=3, vol=.5){
 }
 
 /* musique de menu (embarquée) — jouée du menu jusqu'au lancement du combat,
-   à 30 % du volume général, coupable dans les Options */
+   à 20 % du volume général, coupable dans les Options */
 const MUSIC_SRC = (typeof window!=='undefined' && window.__MUS) ? window.__MUS : '';
 let menuMusic = null;
 function updateMusic(){
@@ -235,7 +239,7 @@ function updateMusic(){
   const MENU_SCREENS=['title','nom','mode','classe','couleur','scores','tutoriel','vsSetup','coopJoin'];
   const enMenu = MENU_SCREENS.includes(game.screen)
     || (game.screen==='options' && game.optionsFrom!=='pause');
-  menuMusic.volume = Math.max(0, Math.min(1, VOL()*.3)) * (saveData.music?1:0);
+  menuMusic.volume = Math.max(0, Math.min(1, VOL()*.2)) * (saveData.music?1:0);
   if(enMenu && saveData.music && VOL()>0){
     if(menuMusic.paused) menuMusic.play().catch(()=>{});
   } else if(!menuMusic.paused) menuMusic.pause();
@@ -436,7 +440,9 @@ class Fighter {
     run.ulti=false; saveData.run=run; persist();
     const u=ULTIS[this.classe]||ULTIS.bouclier;
     addFloater(this.x, GROUND-210+this.y, '★ '+u.nom.toUpperCase()+' ★', '#f5c542');
-    sfx.win(); game.shake=10;
+    sparks(this.x, GROUND-80+this.y, '#f5c542', 42);
+    game.ultiFlash=.5; game.slowmo=.5;
+    sfx.win(); game.shake=12;
     if(this.classe==='bouclier'){ this.ultiT=4; this.stam=this.maxStam; }
     else if(this.classe==='deuxmains'){ this.ultiNext=true; }
     else { this.ultiT=4; }
@@ -827,9 +833,10 @@ class Fighter {
       const d=shieldDrops.find(o=>o.owner===this);
       if(d && dist>170 && !this.busy){ this.aiMove=Math.sign(d.x-this.x); return; }
     }
-    // ---- arme jetée : aller la récupérer ----
-    if(this.thrown){
-      const d=spearDrops.find(o=>o.owner===this);
+    // ---- désarmée : foncer vers l'arme au sol la plus proche (la sienne ou une autre) ----
+    if(this.thrown && spearDrops.length){
+      let d=null, bd=1e9;
+      for(const o of spearDrops){ const dd=Math.abs(o.x-this.x); if(dd<bd){ bd=dd; d=o; } }
       if(d && !this.busy && dist>150){ this.aiMove=Math.sign(d.x-this.x); return; }
     }
     // comportement adaptatif : défensif quand elle est à 20 % de PV,
@@ -1035,15 +1042,18 @@ function updateSpears(dt){
     }
   }
   spears=spears.filter(s=>!s.done);
-  // récupération en marchant dessus
+  // récupération en marchant dessus : toute main vide peut saisir n'importe quelle arme
   for(let i=spearDrops.length-1;i>=0;i--){
-    const d=spearDrops[i], o=d.owner;
-    if(!o.dead && o.thrown && Math.abs(o.x-d.x)<34 && o.y>-12){
-      o.w=o.baseW; o.thrown=false;
-      spearDrops.splice(i,1);
-      const twr=d.w.throwType;
-      addFloater(o.x, GROUND-160, twr+(twr==='couteau'?' récupéré !':' récupérée !'), '#7ee787');
-      sfx.pick();
+    const d=spearDrops[i];
+    for(const f of fightersAll()){
+      if(f && !f.dead && f.thrown && Math.abs(f.x-d.x)<34 && f.y>-12){
+        f.w=d.w; f.baseW=d.w; f.thrown=false;   // l'arme ramassée devient la sienne
+        spearDrops.splice(i,1);
+        const fem = d.w.throwType!=='couteau';
+        addFloater(f.x, GROUND-160, d.w.nom+' ramassé'+(fem?'e':'')+' !', '#7ee787');
+        sfx.pick();
+        break;
+      }
     }
   }
 }
@@ -1405,16 +1415,24 @@ function gotoSelect(){
 function startFight(){
   const e=makeEnemy(run.level);
   player=new Fighter(240, 1, run.weapon, playerOpts());
-  // victoire parfaite → DEUX adversaires (dégâts ×0,67) · coop → TOUJOURS deux (dégâts ×0,8)
+  // dès le niveau 30 : duels à 1 contre 2 ALÉATOIRES (déterministes par lignée),
+  // les deux adversaires portent des armes différentes et frappent à 75 %
   const coop = game.mode==='coop' && game.coopOn;
-  const duo = coop || !!run.flawless;
-  const dmgScale = coop ? .8 : (duo ? .67 : 1);
-  const mkE = (x, suffix, hueShift) => new Fighter(x, -1, e.weapon,
+  const duo = coop || duoAtLevel(run.level);
+  const dmgScale = coop ? .8 : (duo ? .75 : 1);
+  const mkE = (x, suffix, hueShift, weapon) => new Fighter(x, -1, weapon||e.weapon,
     {hp:e.hp, stam:100, speed:e.speed, dmgMult:e.dmgMult*dmgScale, armorFlat:e.armor,
      ai:e, hue:(e.hue+hueShift)%360, stunCh:e.boss?.12:0, classe:e.classe, eqv:e.eqv,
      name:e.name+suffix+(e.boss?' ★':'')});
   enemy = mkE(duo?640:720, '', 0);
-  enemy2 = duo ? mkE(810, ' II', 140) : null;
+  let w2 = e.weapon;
+  if(duo){ // arme différente pour le second
+    const tr2=Object.keys(TREES[e.classe]);
+    const rng2=mulberry32(((run&&run.seed)||0) + run.level*7919 + 17);
+    w2 = tr2[(tr2.indexOf(e.weapon) + 1 + Math.floor(rng2()*(tr2.length-1))) % tr2.length];
+    if(w2===e.weapon) w2 = tr2[(tr2.indexOf(e.weapon)+1)%tr2.length];
+  }
+  enemy2 = duo ? mkE(810, ' II', 140, w2) : null;
   // Joueur 2 (manette) en coop : mêmes stats de lignée, sa classe et sa couleur
   if(coop){
     const saveCl=run.classe, saveHue=run.hue;
@@ -1438,12 +1456,12 @@ function endFight(win){
   if(win){
     const before=unlockedWeapons().length;
     run.wins++;
-    // butin d'or (bonus contre les champions, +50 % pour un duel à deux)
-    const g = Math.round((20 + run.level*3 + (enemy.ai&&enemy.ai.boss?40:0)) * (wasDouble?1.5:1));
+    // butin d'or : +50 % pour un duel à deux, +25 % pour un COMBAT PARFAIT (aucun PV perdu)
+    const parfait = !player.tookDamage;
+    game.lastPerfect = parfait;
+    const g = Math.round((20 + run.level*3 + (enemy.ai&&enemy.ai.boss?40:0)) * (wasDouble?1.5:1) * (parfait?1.25:1));
     run.gold=(run.gold||0)+g; game.lastGold=g;
-    // victoire parfaite (aucun PV perdu) → le prochain combat sera un duel à deux ;
-    // après un duel à deux, la mécanique est remise à zéro
-    run.flawless = (game.mode==='coop') ? false : (wasDouble ? false : !player.tookDamage);
+    run.flawless=false;   // (ancienne mécanique : les duels sont désormais aléatoires dès le niveau 30)
     run.pendingPerks = rollPerks();   // persisté : le perk n'est pas perdu si on ferme le jeu ici
     game.bossUlti = !!(enemy.ai && enemy.ai.boss);
     if(game.bossUlti) run.ulti = true;   // chaque boss vaincu recharge l'ulti (un usage)
@@ -1635,8 +1653,10 @@ function drawFighter(f, t){
   }
   // aura d'ulti active
   if(f.ultiT>0 && !f.dead){
-    ctx.fillStyle='rgba(245,197,66,'+(0.10+Math.sin(t*10)*.05)+')';
-    ctx.beginPath(); ctx.arc(f.x, GROUND-55+f.y, 64, 0, 7); ctx.fill();
+    ctx.fillStyle='rgba(245,197,66,'+(0.16+Math.sin(t*10)*.07)+')';
+    ctx.beginPath(); ctx.arc(f.x, GROUND-55+f.y, 66, 0, 7); ctx.fill();
+    ctx.strokeStyle='rgba(245,197,66,'+(0.5+Math.sin(t*12)*.3)+')'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(f.x, GROUND-55+f.y, 58+Math.sin(t*9)*5, 0, 7); ctx.stroke();
   }
   // anneau doré : fenêtre de contre ouverte
   if(f.counterT>0 && !f.dead){
@@ -1997,13 +2017,30 @@ function drawHUD(){
     if(f.st.bleedT>0)s.push('saignement'); if(f.st.regenT>0)s.push('récupération'); if(f.st.blind>0)s.push('aveuglé'); return s.join(' · '); };
   ctx.font='bold 13px Georgia';
   const ps=stTxt(player); if(ps){ ctx.fillStyle='#ffd7a0'; ctx.textAlign='left'; ctx.fillText(ps, 30, 96); }
-  // indicateur d'ulti
-  if(run.ulti){ ctx.fillStyle='#f5c542'; ctx.textAlign='left'; ctx.font='bold 12px Georgia';
-    ctx.fillText('★ ULTI PRÊTE ('+bindLabel('ulti')+') — '+(ULTIS[run.classe]||ULTIS.bouclier).nom, 30, 112); }
-  else if(player.ultiT>0){ ctx.fillStyle='#f5c542'; ctx.textAlign='left'; ctx.font='bold 12px Georgia';
-    ctx.fillText('★ '+(ULTIS[run.classe]||ULTIS.bouclier).nom+' : '+player.ultiT.toFixed(1)+' s', 30, 112); }
-  else if(player.ultiNext){ ctx.fillStyle='#f5c542'; ctx.textAlign='left'; ctx.font='bold 12px Georgia';
-    ctx.fillText('★ Colère du Colisée : prochaine attaque', 30, 112); }
+  // ---- bandeau ULTI bien visible en bas de l'écran ----
+  const fU = (player.ultiT>0||player.ultiNext) ? player
+           : (player2 && (player2.ultiT>0||player2.ultiNext)) ? player2 : null;
+  if(game.mode!=='versus' && (run.ulti || fU)){
+    const uCl=(fU&&fU.classe)||run.classe;
+    const uInfo=ULTIS[uCl]||ULTIS.bouclier;
+    const bw=480, bx=W/2-bw/2, by=H-44;
+    ctx.fillStyle='rgba(28,18,4,.78)';
+    ctx.beginPath(); ctx.roundRect(bx,by,bw,34,10); ctx.fill();
+    if(run.ulti && !fU){
+      const pulse=.5+Math.sin(game.time*7)*.35;
+      ctx.strokeStyle='rgba(245,197,66,'+pulse+')'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.roundRect(bx,by,bw,34,10); ctx.stroke();
+      title2('★ ULTI PRÊTE — '+uInfo.nom.toUpperCase()+'  ·  touche '+bindLabel('ulti')+' / manette Y', W/2, by+22, 14, '#f5c542');
+    } else if(fU){
+      ctx.strokeStyle='#f5c542'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.roundRect(bx,by,bw,34,10); ctx.stroke();
+      if(fU.ultiNext) title2('★ '+uInfo.nom.toUpperCase()+' — PROCHAINE ATTAQUE', W/2, by+22, 14, '#ffe97a');
+      else {
+        title2('★ '+uInfo.nom.toUpperCase()+' — '+fU.ultiT.toFixed(1)+' s', W/2, by+13, 13, '#ffe97a');
+        bar(bx+16, by+21, bw-32, 7, fU.ultiT/4, '#f5c542', '#3a2c10', false);
+      }
+    }
+  }
   const es=stTxt(enemy); if(es){ ctx.fillStyle='#ffd7a0'; ctx.textAlign='right'; ctx.fillText(es, W-30, 96); }
   ctx.textAlign='center'; ctx.fillStyle='#fff'; ctx.font='bold 20px Georgia';
   ctx.shadowColor='rgba(0,0,0,.7)'; ctx.shadowBlur=4;
@@ -2262,8 +2299,9 @@ function drawSelect(t){
   if(run.wins===0) backBtn(()=>{ game.screen='couleur'; });   // avant le premier combat, on peut revenir
   title('COMBAT '+run.level+' / '+MAX_LEVEL, 78, 36, '#f5c542');
   const e=makeEnemy(Math.min(MAX_LEVEL,run.level));
-  title('Adversaire : '+e.name+(e.boss?'  ★ CHAMPION ★':'')+'  ('+WEAPONS[e.weapon].nom+')'+(run.flawless?'  ×2 !':''), 115, 20, '#ffb0a0');
-  if(run.flawless) title('VICTOIRE PARFAITE — deux adversaires t’attendent (dégâts réduits de 33 %)', 142, 15, '#f5c542');
+  const duoNext = duoAtLevel(Math.min(MAX_LEVEL,run.level));
+  title('Adversaire : '+e.name+(e.boss?'  ★ CHAMPION ★':'')+'  ('+WEAPONS[e.weapon].nom+')'+(duoNext?'  ×2 !':''), 115, 20, '#ffb0a0');
+  if(duoNext && game.mode!=='coop') title('L’arène veut du spectacle : DEUX adversaires (dégâts réduits de 25 %)', 142, 15, '#f5c542');
   title('Choisis ton arme (clique)', 155, 20, '#fff');
   const list=unlockedWeapons();
   const cw=118, gap=12, total=list.length*cw+(list.length-1)*gap, x0=(W-total)/2;
@@ -2312,6 +2350,7 @@ function drawVictory(t){
   title('VICTOIRE !', 190, 56, '#f5c542');
   title(enemy.name+' mord la poussière. La foule scande « '+run.name+' ! »', 240, 20, '#fff');
   title('+'+(game.lastGold||0)+' pièces d’or  (bourse : '+run.gold+')', 278, 19, '#ffd700');
+  if(game.lastPerfect) title('★ COMBAT PARFAIT — or +25 % ★', 252, 17, '#7ee787');
   if(game.newUnlock) title('★ Nouvelle arme débloquée : '+game.newUnlock+' ★', 312, 22, '#7ee787');
   if(game.bossUlti) title('★ ULTI rechargée : '+(ULTIS[run.classe]||ULTIS.bouclier).nom+' ('+bindLabel('ulti')+') ★', 342, 20, '#f5c542');
   const bx=W/2-130, by=380;
@@ -2689,6 +2728,7 @@ function frame(now){
   game.particles.forEach(p=>{p.t+=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=800*dt;});
   game.particles=game.particles.filter(p=>p.t<p.life);
   if(game.shake>0) game.shake=Math.max(0,game.shake-dt*40);
+  if(game.ultiFlash>0) game.ultiFlash=Math.max(0,game.ultiFlash-dt*1.4);
 
   // transformation haute résolution : tout le jeu dessine en coordonnées 960×540
   const scl=cv._scale||1;
@@ -2738,6 +2778,10 @@ function frame(now){
       const rg=ctx.createRadialGradient(player.x, GROUND-80, 70, player.x, GROUND-80, 520);
       rg.addColorStop(0,'rgba(0,0,0,0)'); rg.addColorStop(1,'rgba(0,0,0,'+a+')');
       ctx.fillStyle=rg; ctx.fillRect(0,0,W,H);
+    }
+    if(game.ultiFlash>0){
+      ctx.fillStyle='rgba(245,197,66,'+(game.ultiFlash*.4)+')';
+      ctx.fillRect(0,0,W,H);
     }
     drawHUD();
     if(S==='victory') drawVictory(t);
