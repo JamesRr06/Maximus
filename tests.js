@@ -111,6 +111,29 @@ eval(src + `;(${function(){
   }
   check('un combat se termine ('+(fr/60).toFixed(1)+' s)', player.dead||enemy.dead);
 
+  /* ---- couche d'intention (base du mode en ligne) ---- */
+  run=newRun('T'); run.level=1; startFight();
+  check('intent : objet présent sur le combattant', !!player.intent && typeof player.intent.move==='number');
+  // On simule une source distante : l'intent est injecté (non écrasé par le local)
+  player.inputSrc='remote';
+  // attaque pilotée uniquement par l'intent (comme le fera une entrée réseau)
+  player.state='idle'; player.t=0; player.stam=100; enemy.x=player.x+40; player.facing=1;
+  player.intent.attack=true; player.update(1/60, enemy);
+  check('intent : attaque déclenchée via intent.attack', player.busy || player.state==='attack');
+  check('intent : flag ponctuel consommé (remis à false)', player.intent.attack===false);
+  // déplacement piloté par intent.move
+  player.state='idle'; player.t=0; player.vx=0; player.st.stun=0; player.blocking=false;
+  const x0=player.x; player.intent.move=1; player.intent.crouch=false;
+  for(let i=0;i<15;i++){ player.intent.move=1; player.update(1/60, enemy); }
+  check('intent : déplacement via intent.move', player.x>x0);
+  // garde maintenue via intent.block
+  player.state='idle'; player.t=0; player.y=0; player.st.stun=0;
+  player.intent.move=0; player.intent.block=true; player.update(1/60, enemy);
+  check('intent : garde maintenue via intent.block', player.blocking===true);
+  player.intent.block=false; player.update(1/60, enemy);
+  check('intent : garde relâchée quand intent.block retombe', player.blocking===false);
+  player.inputSrc='local';
+
   /* ---- défenses ---- */
   run=newRun('T'); run.level=1; startFight();
   enemy.dead=false; enemy.x=player.x+40; player.facing=1; player.stam=100;
@@ -272,6 +295,172 @@ eval(src + `;(${function(){
   check('coop : pas de mécanique victoire parfaite', run.flawless===false);
   game.mode='solo'; game.coopOn=false; player2=null;
   check('manette absente : padList vide et sans erreur', padList().length===0);
+
+  /* ---- réseau en ligne : machine à états du salon (étape 2) ---- */
+  (function(){
+    function FakeWS(){ this.readyState=1; this.sent=[]; const self=this;
+      this.send=s=>self.sent.push(JSON.parse(s));
+      this.close=()=>{ self.readyState=3; if(self.onclose) self.onclose(); }; }
+    let fake=null;
+    Net._mk=()=>{ fake=new FakeWS(); return fake; };
+    // hôte
+    Net.host(); fake.onopen();
+    check('réseau : host envoie {t:host}', fake.sent.length===1 && fake.sent[0].t==='host');
+    fake.onmessage({data:JSON.stringify({t:'hosted', code:'MAX-AB12'})});
+    check('réseau : code reçu, statut waiting', Net.code==='MAX-AB12' && Net.status==='waiting');
+    let ready=false; Net.onReady=()=>ready=true;
+    fake.onmessage({data:JSON.stringify({t:'peer-joined'})});
+    check('réseau : peer-joined -> ready + callback', Net.status==='ready' && ready===true);
+    let got=null; Net.onData=m=>got=m;
+    fake.onmessage({data:JSON.stringify({t:'state', hp:7})});
+    check('réseau : message applicatif routé vers onData', !!got && got.hp===7);
+    Net.leave();
+    check('réseau : leave remet à idle', Net.status==='idle' && Net.ws===null);
+    // client + erreur
+    Net.join('max-zzzz'); fake.onopen();
+    check('réseau : join envoie {t:join, code} en majuscules', fake.sent[0].t==='join' && fake.sent[0].code==='MAX-ZZZZ');
+    fake.onmessage({data:JSON.stringify({t:'error', reason:'no-room'})});
+    check('réseau : no-room -> statut error + message', Net.status==='error' && /introuvable/.test(Net.error));
+    Net.leave(); Net.onReady=null; Net.onData=null;
+  })();
+
+  /* ---- écrans EN LIGNE : rendu (étape 2) ---- */
+  game.screen='onlineMenu'; drawOnlineMenu(1.0);
+  check('écran onlineMenu : rendu (3 classes + héberger/rejoindre)', game.cards.length===6);
+  Net.code='MAX-AB12'; Net.status='waiting'; game.screen='onlineHost'; drawOnlineHost(1.0);
+  check('écran onlineHost : rendu (code affiché)', true);
+  Net.status='ready'; drawOnlineHost(1.0);
+  check('écran onlineHost : rendu état connecté', true);
+  Net.status='idle'; Net.code=''; game.codeInput='AB12'; game.screen='onlineJoin'; drawOnlineJoin(1.0);
+  check('écran onlineJoin : rendu + bouton rejoindre', game.cards.length===2);
+  Net.leave(); game.screen='mode'; drawMode(1.0);
+  check('écran mode : carte EN LIGNE présente (4 cartes)', game.cards.length===5);
+
+  /* ---- mode en ligne : boucle host-autoritaire (étape 3) ---- */
+  (function(){
+    const fake={ readyState:1, sent:[], send(s){ this.sent.push(JSON.parse(s)); }, close(){} };
+    Net.ws=fake; saveData.name='Hôte'; saveData.onlineScore=0;
+    // HANDSHAKE : l'hôte reçoit le hello de l'invité -> envoie start + démarre
+    Net.role='host';
+    onlineOnData({t:'hello', build:BUILD, cfg:{classe:'bouclier', name:'Invité', look:null}});
+    const startMsg=fake.sent.find(m=>m.t==='start');
+    check('en ligne : hôte répond par un start', !!startMsg && !!startMsg.cfg);
+    check('en ligne : hôte démarre le combat', game.online===true && game.screen==='fight');
+    check('en ligne : hôte contrôle player (local), player2 distant',
+      player.inputSrc==='local' && player2.inputSrc==='remote');
+    check('en ligne : match remis à zéro (0-0, manche 1)',
+      game.rounds.p1===0 && game.rounds.p2===0 && game.roundNo===1 && !game.matchOver);
+    const cfg=startMsg.cfg;
+    // INTENT : l'hôte applique l'intent reçu de l'invité à player2
+    onlineOnData({t:'in', i:{move:1, attack:true, block:true}});
+    check('en ligne : intent réseau appliqué à player2',
+      player2.intent.move===1 && player2.intent.attack===true && player2.intent.block===true);
+    // SNAPSHOT : aller-retour (sérialisation -> application)
+    player.x=333; player.hp=71; player2.x=444; player2.hp=52;
+    const snap=makeSnap();
+    player.x=0; player.hp=1; player2.x=0; player2.hp=1;
+    applySnap(snap);
+    check('en ligne : snapshot restitue positions et PV',
+      player.x===333 && player.hp===71 && player2.x===444 && player2.hp===52);
+    // BEST-OF-5 : trois manches gagnées par l'hôte -> fin de match + point
+    Net.role='host'; game.matchOver=false; game.rounds={p1:0,p2:0}; game.roundOver=false; game.pointAwarded=false;
+    for(let r=0;r<3;r++){
+      player.dead=false; player2.dead=true; game.koTimer=1.7; game.roundOver=false;
+      onlineHostPostUpdate(0.1);
+    }
+    check('en ligne : premier à 3 manches -> match terminé', game.matchOver===true && game.rounds.p1===3);
+    check('en ligne : écran de fin affiché', game.screen==='onlineEnd');
+    check('en ligne : +1 point au vainqueur (hôte)', (saveData.onlineScore||0)===1);
+    // rendu de l'écran de fin
+    drawOnlineEnd(1.0);
+    check('en ligne : écran de fin -> revanche + quitter', game.cards.length===2);
+    // CÔTÉ INVITÉ : reçoit start -> contrôle player2 en local
+    Net.role='guest';
+    onlineOnData({t:'start', cfg});
+    check('en ligne : invité contrôle player2 (local), player distant',
+      player2.inputSrc==='local' && player.inputSrc==='remote');
+    check('en ligne : combattant local = player2 côté invité', localFighter()===player2);
+    Net.role='host';
+    check('en ligne : combattant local = player côté hôte', localFighter()===player);
+    Net.leave(); game.online=false; game.mode='solo'; player2=null; game.screen='title';
+  })();
+
+  /* ---- lissage de latence : interpolation / prédiction / réconciliation (étape 4) ---- */
+  (function(){
+    const fake={ readyState:1, sent:[], send(s){ this.sent.push(JSON.parse(s)); }, close(){} };
+    Net.ws=fake; Net.role='guest';
+    const cfg={ seed:1, p1:{classe:'bouclier',hue:210,name:'H',look:null},
+                        p2:{classe:'bouclier',hue:0,name:'I',look:null} };
+    onlineOnData({t:'start', cfg});
+    check('étape4 : invité prêt (player2 local)', player2.inputSrc==='local' && game.online===true);
+    // PRÉDICTION : la simulation locale avance sans attendre de snapshot
+    player2.inputSrc='remote'; // (proxy : en headless il n'y a pas de clavier pour remplir l'intent)
+    player2.state='idle'; player2.t=0; player2.vx=0; player2.st.stun=0; player2.dead=false;
+    const px0=player2.x;
+    for(let i=0;i<12;i++){ player2.intent.move=1; player2.update(1/60, player, [player]); }
+    check('étape4 : prédiction locale (déplacement immédiat)', player2.x>px0);
+    player2.inputSrc='local';
+    // INTERPOLATION : l'adversaire est lissé entre deux snapshots
+    const T=perfNow();
+    const mk=(x)=>({t:'snap', a:Object.assign(fSnap(player),{x:x}), b:fSnap(player2), sp:[], fo:[], rn:1, rs:{p1:0,p2:0}, ko:0});
+    game.snapHist=[{time:T-300, s:mk(100)}, {time:T+60, s:mk(400)}];
+    interpRemote(player);
+    check('étape4 : adversaire interpolé entre deux positions', player.x>100 && player.x<400);
+    // RÉCONCILIATION : PV autoritaires + correction douce de la position
+    const stZ={slow:0,stun:0,blind:0,bleedT:0,bleedDps:0,regenT:0,regenPs:0};
+    player2.x=200; player2.dead=false; player2.state='attack';
+    reconcileSelf(player2, Object.assign(fSnap(player2),{hp:33, x:260, s:'attack', d:false, st:stZ}));
+    check('étape4 : PV autoritaires appliqués', player2.hp===33);
+    check('étape4 : correction douce (pas de téléport)', player2.x>200 && player2.x<260);
+    // INTERRUPTION : l'autorité impose l'état « touché » + la position
+    player2.x=200; player2.state='attack';
+    reconcileSelf(player2, Object.assign(fSnap(player2),{hp:20, x:150, s:'hit', d:false, st:Object.assign({},stZ,{stun:400})}));
+    check('étape4 : interruption -> état + position autoritaires', player2.state==='hit' && player2.x===150);
+    Net.leave(); game.online=false; game.mode='solo'; player2=null; game.screen='title';
+  })();
+
+  /* ---- raffinement : choix de classe en ligne ---- */
+  (function(){
+    const fake={ readyState:1, sent:[], send(s){ this.sent.push(JSON.parse(s)); }, close(){} };
+    Net.ws=fake; Net.role='host'; saveData.onlineClass='double';
+    onlineOnData({t:'hello', build:BUILD, cfg:{classe:'deuxmains', name:'Inv', look:null}});
+    const sm=fake.sent.find(m=>m.t==='start');
+    check('classe en ligne : hôte utilise sa classe (p1)', sm.cfg.p1.classe==='double');
+    check('classe en ligne : invité transmet sa classe (p2)', sm.cfg.p2.classe==='deuxmains');
+    check('classe en ligne : combattants créés avec la bonne classe', player.classe==='double' && player2.classe==='deuxmains');
+    // le sélecteur du menu mémorise le choix
+    saveData.onlineClass='bouclier'; game.screen='onlineMenu'; drawOnlineMenu(1.0);
+    const classCard=game.cards[3]; classCard.action(); // une carte de classe (backBtn=0, classes=1..3)
+    check('classe en ligne : sélecteur mémorise une classe valide', !!CLASSES[saveData.onlineClass]);
+    Net.leave(); game.online=false; game.mode='solo'; player2=null; game.screen='title';
+  })();
+
+  /* ---- raffinements : pièges synchronisés + entracte de manche ---- */
+  (function(){
+    const fake={ readyState:1, sent:[], send(s){ this.sent.push(JSON.parse(s)); }, close(){} };
+    Net.ws=fake; Net.role='host'; saveData.onlineClass='bouclier';
+    onlineOnData({t:'hello', build:BUILD, cfg:{classe:'bouclier', name:'I', look:null}});
+    // fin de manche -> entracte (pas de reset immédiat)
+    game.rounds={p1:0,p2:0}; game.roundOver=false; game.matchOver=false; game.interRound=0; game.koTimer=1.7;
+    player.dead=false; player2.dead=true;
+    onlineHostPostUpdate(0.1);
+    check('entracte : manche gagnée -> entracte actif', game.interRound>0 && game.rounds.p1===1);
+    // snapshot : pièges + entracte transportés
+    traps=[{type:'spikes', x:300, t:0.2, phase:'warn', side:0, stone:false, hit:new Set()}];
+    const snap=makeSnap();
+    check('pièges : snapshot contient les pièges', snap.tr.length===1 && snap.tr[0].ty==='spikes');
+    check('entracte : snapshot transporte interRound', snap.ir>0);
+    // application côté client
+    traps=[]; game.interRound=0;
+    applySnapMeta(snap);
+    check('pièges : appliqués côté client', traps.length===1 && traps[0].type==='spikes' && traps[0].phase==='warn');
+    check('entracte : appliqué côté client', game.interRound>0);
+    // l'entracte se résorbe et enchaîne la manche suivante (hôte)
+    Net.role='host'; game.interRound=0.05; game.roundNo=2; game.matchOver=false;
+    onlineFrame(0.1);
+    check('entracte : fin d’entracte -> combattants réinitialisés', game.interRound===0 && player.dead===false && player2.dead===false);
+    Net.leave(); game.online=false; game.mode='solo'; player2=null; game.screen='title'; traps=[];
+  })();
 
   /* ---- boss : compétences spéciales ---- */
   run=newRun('T'); run.level=10; startFight();

@@ -1,0 +1,13 @@
+{
+  "name": "maximus-relay",
+  "version": "1.0.0",
+  "description": "Relais WebSocket pour le mode en ligne de Maximus (mise en relation par code de salon).",
+  "main": "relay.js",
+  "scripts": {
+    "start": "node relay.js",
+    "test": "node test-relay.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

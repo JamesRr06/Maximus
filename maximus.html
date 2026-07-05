@@ -271,7 +271,7 @@ let menuMusic = null;
 function updateMusic(){
   if(typeof Audio === 'undefined' || !MUSIC_SRC) return;
   if(!menuMusic){ menuMusic = new Audio(MUSIC_SRC); menuMusic.loop = true; }
-  const MENU_SCREENS=['title','nom','mode','classe','couleur','perso','scores','tutoriel','vsSetup','coopJoin'];
+  const MENU_SCREENS=['title','nom','mode','classe','couleur','perso','scores','tutoriel','vsSetup','coopJoin','onlineMenu','onlineHost','onlineJoin'];
   const enMenu = MENU_SCREENS.includes(game.screen)
     || ((game.screen==='options'||game.screen==='optionsPad') && game.optionsFrom!=='pause');
   menuMusic.volume = Math.max(0, Math.min(1, VOL()*.2)) * (saveData.music?1:0);
@@ -349,35 +349,24 @@ function padPressed(p,i){
   return now && !was;
 }
 function padFighterFor(idx){
-  // multi : chaque combattant humain déclare sa manette via padIdx.
-  // 1 manette = clavier J1 + manette J2 ; 2 manettes = une par joueur.
-  if(game.mode==='versus' || game.mode==='coop'){
-    if(player2 && player2.padIdx===idx) return player2;
-    if(player  && player.padIdx===idx)  return player;
-    return null;
-  }
-  return player;   // solo : la manette pilote le joueur
+  // en multi, la manette 0 contrôle le Joueur 2 ; en solo elle contrôle le joueur
+  if(game.mode==='versus' || game.mode==='coop') return idx===0 ? player2 : null;
+  return player;
 }
 function updatePads(){
   for(const p of padList()){
-    const f=padFighterFor(p.index);
+    let f=padFighterFor(p.index);
+    if(game.online) f = (p.index===0) ? localFighter() : null;   // en ligne, la manette 0 pilote MON combattant
     const enCombat = game.screen==='fight' && !game.paused;
     if(enCombat && f && !f.dead){
-      if(padPressed(p,padBinds.pause)){ game.paused=true; continue; }
-      if(padPressed(p,padBinds.jump)) f.jump();
-      if(padPressed(p,padBinds.attack)) f.startAttack();
-      if(padPressed(p,padBinds.dodge)){ const d=padAxisX(p); f.startDash(d?Math.sign(d):-f.facing); }
-      if(padPressed(p,padBinds.roll)){ const d=padAxisX(p); f.startRoll(d?Math.sign(d):-f.facing); }
-      if(padPressed(p,padBinds.throw)) f.startThrow();
-      if(padPressed(p,padBinds.ulti)) f.activateUlti();
-      const gb=p.buttons[padBinds.guard];
-      const rt = !!(gb && (gb.value>.4 || gb.pressed));
-      if(f.classe==='double'){ if(padPressed(p,padBinds.guard)) f.startAttack(null,true); }
-      else {
-        if(rt && !f.busy && f.canBlock() && !f.airborne && f.st.stun<=0) f.blocking=true;
-        else if(!rt && f.padBlock) f.blocking=false;
-        f.padBlock=rt;
-      }
+      if(padPressed(p,padBinds.pause)){ if(!game.online) game.paused=true; continue; }
+      if(padPressed(p,padBinds.jump)) f.intent.jump=true;
+      if(padPressed(p,padBinds.attack)) f.intent.attack=true;
+      if(padPressed(p,padBinds.dodge)){ const d=padAxisX(p); f.intent.dodge=true; f.intent.aimDir=d; }
+      if(padPressed(p,padBinds.roll)){ const d=padAxisX(p); f.intent.roll=true; f.intent.aimDir=d; }
+      if(padPressed(p,padBinds.throw)) f.intent.throw=true;
+      if(padPressed(p,padBinds.ulti)) f.intent.ulti=true;
+      if(f.classe==='double'){ if(padPressed(p,padBinds.guard)) f.intent.attackAlt=true; }
     } else {
       // capture d'un bouton pour le remappage (écran Options > Manette)
       if(game.padRebind){
@@ -495,6 +484,42 @@ function tree(){ return TREES[run.classe||'bouclier']; }
 function unlockedWeapons(){ const t=tree(); return Object.keys(t).filter(k=>t[k]<=run.wins); }
 
 /* ============ COMBATTANT ============ */
+/* --- Couche d'intention : source d'entrées unifiée (clavier / manette / réseau) ---
+   Chaque combattant humain expose un objet `intent` rempli par frame. Les sources
+   locales (clavier, souris, manette) le remplissent ; le réseau pourra le remplir
+   à l'identique. `consumeIntent` applique l'intention au combattant. */
+function mkIntent(){ return {move:0,crouch:false,block:false,jump:false,attack:false,attackAlt:false,dodge:false,roll:false,throw:false,ulti:false,aimDir:0}; }
+let mouseBlockHeld=false;
+function fillHumanIntent(f){
+  const it=f.intent;
+  if(f.padIdx!=null){
+    const p=padList().find(q=>q.index===f.padIdx);
+    it.move = p ? padAxisX(p) : 0;
+    it.crouch = !!(p && padCrouch(p));
+    if(f.classe!=='double'){ const gb=p&&p.buttons[padBinds.guard]; it.block = !!(gb && (gb.value>.4 || gb.pressed)); }
+    else it.block=false;
+  } else {
+    let mv=(held('right')?1:0)-(held('left')?1:0);
+    let cr=held('crouch'); let padBlk=false;
+    if(!player2 || game.online){ const p=padList().find(q=>q.index===0); if(p){ const pm=padAxisX(p); if(pm) mv=pm; if(padCrouch(p)) cr=true; const gb=p.buttons[padBinds.guard]; if(gb&&(gb.value>.4||gb.pressed)) padBlk=true; } }
+    it.move=mv; it.crouch=cr; it.block = (mouseBlockHeld||padBlk) && f.classe!=='double';
+  }
+}
+function consumeIntent(f){
+  const it=f.intent;
+  if(it.jump) f.jump();
+  if(it.attack) f.startAttack();
+  if(it.attackAlt) f.startAttack(null,true);
+  if(it.dodge) f.startDash(it.aimDir?Math.sign(it.aimDir):-f.facing);
+  if(it.roll) f.startRoll(it.aimDir?Math.sign(it.aimDir):-f.facing);
+  if(it.throw) f.startThrow();
+  if(it.ulti) f.activateUlti();
+  if(f.classe!=='double'){
+    if(it.block && !f.busy && f.canBlock() && !f.airborne && f.st.stun<=0) f.blocking=true;
+    else if(!it.block) f.blocking=false;
+  }
+  it.jump=it.attack=it.attackAlt=it.dodge=it.roll=it.throw=it.ulti=false;
+}
 class Fighter {
   constructor(x, facing, weaponKey, opts){
     this.x=x; this.y=0; this.vy=0; this.facing=facing;
@@ -507,6 +532,8 @@ class Fighter {
     this.hue=opts.hue; this.player=!!opts.player; this.name=opts.name;
     this.look=opts.look||null;   // physique (sexe, tête, coiffure, barbe, cheveux, peau, torse)
     this.state='idle'; this.t=0;
+    this.intent=mkIntent();
+    this.inputSrc='local';   // 'local' = clavier/manette ; 'remote' = rempli par le réseau
     this.attackPhase=null; this.attackType='mid'; this.hasHit=false; this.airAttacked=false;
     this.blocking=false; this.crouch=false;
     this.vx=0; this.walkT=0; this.flash=0; this.dead=false;
@@ -782,6 +809,7 @@ class Fighter {
     game.slowmo=.9; sfx.ko();
   }
   update(dt, foe, foes){
+    if(!this.isAI){ if(this.inputSrc==='local') fillHumanIntent(this); consumeIntent(this); }
     this.t += dt*1000;
     if(this.flash>0) this.flash -= dt*4;
     // statuts
@@ -872,20 +900,7 @@ class Fighter {
     else {
       let mv=0;
       if(this.isAI) mv=this.aiMove;
-      else if(this.padIdx!=null){
-        const p=padList().find(q=>q.index===this.padIdx);
-        mv = p ? padAxisX(p) : 0;
-        this.crouch = !this.airborne && this.st.stun<=0 && !!(p && padCrouch(p));
-      } else {
-        mv = (held('right')?1:0)-(held('left')?1:0);
-        let cr = held('crouch');
-        // en solo, la manette peut aussi piloter le joueur clavier
-        if(!player2){
-          const p=padList().find(q=>q.index===0);
-          if(p){ const pm=padAxisX(p); if(pm) mv=pm; if(padCrouch(p)) cr=true; }
-        }
-        this.crouch = !this.airborne && this.st.stun<=0 && cr;
-      }
+      else { mv=this.intent.move; this.crouch = !this.airborne && this.st.stun<=0 && this.intent.crouch; }
       if(this.st.stun>0) mv=0;
       if(this.blocking) mv*=.3;
       if(this.crouch) mv*=.45;
@@ -1048,15 +1063,18 @@ cv.addEventListener('mousedown', e=>{
         if(p.x>=c.x&&p.x<=c.x+c.w&&p.y>=c.y&&p.y<=c.y+c.h){ c.action(); return; }
       }
     }
-    if(game.screen==='fight' && !game.paused && player && !player.dead) player.startAttack();
+    if(game.screen==='fight' && !game.paused){ const me=localFighter(); if(me && !me.dead) me.intent.attack=true; }
   }
-  if(e.button===2 && game.screen==='fight' && !game.paused && player && !player.dead){
-    if(player.classe==='double'){ player.startAttack(null, true); }           // coup de la main gauche
-    else if(!player.busy && player.canBlock() && !player.airborne && player.st.stun<=0) player.blocking=true;
+  if(e.button===2 && game.screen==='fight' && !game.paused){
+    const me=localFighter();
+    if(me && !me.dead){
+      mouseBlockHeld=true;
+      if(me.classe==='double'){ me.intent.attackAlt=true; }           // coup de la main gauche
+    }
   }
 });
-cv.addEventListener('mouseup', e=>{ if(e.button===2 && player) player.blocking=false; });
-cv.addEventListener('mouseleave', ()=>{ if(player) player.blocking=false; });
+cv.addEventListener('mouseup', e=>{ if(e.button===2){ mouseBlockHeld=false; const me=localFighter(); if(me) me.blocking=false; } });
+cv.addEventListener('mouseleave', ()=>{ mouseBlockHeld=false; const me=localFighter(); if(me) me.blocking=false; });
 
 function handleKey(e){
   const S=game.screen, code=e.code;
@@ -1075,6 +1093,16 @@ function handleKey(e){
     if(code==='Escape'){ game.screen='title'; }
     return;
   }
+  if(S==='onlineJoin'){
+    if(e.key && e.key.length===1 && /[A-Za-z0-9-]/.test(e.key) && (game.codeInput||'').length<8){ game.codeInput=(game.codeInput||'')+e.key.toUpperCase(); }
+    if(code==='Backspace') game.codeInput=(game.codeInput||'').slice(0,-1);
+    if(code==='Enter'||code==='NumpadEnter'){ onlineDoJoin(); }
+    if(code==='Escape'){ Net.leave(); game.screen='onlineMenu'; }
+    return;
+  }
+  if(S==='onlineMenu' && code==='Escape'){ Net.leave(); game.screen='mode'; return; }
+  if(S==='onlineHost' && code==='Escape'){ Net.leave(); game.screen='onlineMenu'; return; }
+  if(S==='onlineEnd' && code==='Escape'){ onlineQuit(); return; }
   if(S==='title'){
     if(code==='Enter'||code==='NumpadEnter'){ game.nameInput=saveData.name||'Maximus'; game.screen='nom'; }
     return;
@@ -1089,20 +1117,15 @@ function handleKey(e){
   if(S==='coopJoin' && code==='Escape'){ game.screen='couleur'; return; }
   if(S==='vsEnd' && code==='Escape'){ game.mode='solo'; player2=null; game.screen='title'; return; }
   if(S==='fight'){
-    if(pressed('pause', e)){ game.paused=!game.paused; return; }
+    if(pressed('pause', e)){ if(!game.online) game.paused=!game.paused; return; }
     if(game.paused) return;
-    if(player && !player.dead){
-      if(pressed('jump', e)){ e.preventDefault(); player.jump(); }
-      if(pressed('dodge', e)){
-        const dir = held('right')?1:(held('left')?-1:-player.facing);
-        player.startDash(dir);
-      }
-      if(pressed('roll', e)){
-        const dir = held('right')?1:(held('left')?-1:-player.facing);
-        player.startRoll(dir);
-      }
-      if(pressed('throw', e)) player.startThrow();
-      if(pressed('ulti', e)) player.activateUlti();
+    const me=localFighter();
+    if(me && !me.dead){
+      if(pressed('jump', e)){ e.preventDefault(); me.intent.jump=true; }
+      if(pressed('dodge', e)){ me.intent.dodge=true; me.intent.aimDir = held('right')?1:(held('left')?-1:0); }
+      if(pressed('roll', e)){ me.intent.roll=true; me.intent.aimDir = held('right')?1:(held('left')?-1:0); }
+      if(pressed('throw', e)) me.intent.throw=true;
+      if(pressed('ulti', e)) me.intent.ulti=true;
     }
     return;
   }
@@ -1566,8 +1589,7 @@ function startFight(){
     run.classe=saveCl; run.hue=saveHue;
     const t2=TREES[o2.classe], u2=Object.keys(t2).filter(k=>t2[k]<=run.wins);
     player2=new Fighter(330, 1, u2[u2.length-1]||Object.keys(t2)[0], o2);
-    if(padList().length>=2){ player.padIdx=0; player2.padIdx=1; }   // deux manettes : une par joueur
-    else player2.padIdx=0;                                          // une manette : clavier J1 + manette J2
+    player2.padIdx=0;
   } else if(game.mode!=='versus'){ player2=null; }
   shieldDrops=[]; spears=[]; spearDrops=[];
   traps=[]; trapTimer=trapDelay()+2;   // premier piège un peu retardé
@@ -2274,7 +2296,7 @@ function backBtn(action){
 function drawTitle(t){
   drawArena(t); overlay(.55); game.cards=[];
   title('MAXIMUS', 140, 72, '#f5c542');
-  title('AWE - ceux qui vont mourir te saluent', 185, 22, '#e8d9b0');
+  title('— roguelike de gladiature —', 185, 22, '#e8d9b0');
   title('Une seule vie. '+MAX_LEVEL+' combats. Si tu tombes, la lignée s’éteint.', 225, 18, '#fff');
   const bx=W/2-130;
   let y=248;
@@ -2303,6 +2325,343 @@ function drawQuit(t){
   title('AVE ATQUE VALE', 240, 40, '#f5c542');
   title('Tu peux fermer cette fenêtre.', 290, 18, '#ccc');
 }
+/* ============ RÉSEAU (mode en ligne) ============
+   Connexion au relais + salon par code. La simulation host-autoritaire et
+   l'échange intent/snapshot arrivent à l'étape 3 (voir dev/PISTE-ONLINE.md).
+   `_mk` est injectable pour permettre les tests hors navigateur. */
+const DEFAULT_RELAY = 'ws://localhost:8080';
+const Net = {
+  ws:null, role:null, code:'', status:'idle',   // idle|connecting|waiting|ready|error|closed
+  error:'', onReady:null, onData:null, onPeerLeft:null,
+  _mk(url){ return new WebSocket(url); },
+  url(){ return (typeof saveData!=='undefined' && saveData && saveData.relayUrl) || DEFAULT_RELAY; },
+  _open(after){
+    this.status='connecting'; this.error='';
+    let ws; try { ws=this._mk(this.url()); }
+    catch(e){ this.status='error'; this.error='connexion impossible'; return; }
+    this.ws=ws;
+    ws.onopen=()=>{ if(after) after(); };
+    ws.onmessage=(ev)=>{ let m; try{ m=JSON.parse(ev.data); }catch(e){ return; } this._handle(m); };
+    ws.onerror=()=>{ if(this.status!=='ready'){ this.status='error'; if(!this.error) this.error='serveur injoignable'; } };
+    ws.onclose=()=>{ if(this.status!=='error' && this.status!=='ready') this.status='closed'; };
+  },
+  host(){ this.role='host'; this.code=''; this._open(()=>this.send({t:'host'})); },
+  join(code){ this.role='guest'; this.code=(code||'').toUpperCase(); this._open(()=>this.send({t:'join', code:this.code})); },
+  send(obj){ if(this.ws && this.ws.readyState===1) this.ws.send(JSON.stringify(obj)); },
+  leave(){ try{ if(this.ws && this.ws.readyState===1) this.send({t:'leave'}); if(this.ws) this.ws.close(); }catch(e){}
+           this.ws=null; this.status='idle'; this.role=null; this.code=''; this.error=''; },
+  _handle(m){
+    switch(m.t){
+      case 'hosted': this.code=m.code; this.status='waiting'; break;
+      case 'joined': this.status='ready'; if(this.onReady) this.onReady(); break;
+      case 'peer-joined': this.status='ready'; if(this.onReady) this.onReady(); break;
+      case 'peer-left': this.status='waiting'; if(this.onPeerLeft) this.onPeerLeft(); break;
+      case 'error': this.status='error';
+        this.error=({'no-room':'salon introuvable','room-full':'salon complet',
+                     'not-in-room':'hors salon','bad-json':'message invalide'})[m.reason]||m.reason; break;
+      default: if(this.onData) this.onData(m);
+    }
+  }
+};
+function onlineDoJoin(){
+  let code=(game.codeInput||'').toUpperCase().replace(/\s/g,'');
+  if(!code) return;
+  if(!code.startsWith('MAX-')) code='MAX-'+code.replace(/^MAX-?/,'');
+  Net.join(code);
+}
+
+/* ============ MODE EN LIGNE — boucle host-autoritaire (étape 3) ============
+   Hôte = p1 (gauche), autorité complète. Invité = p2 (droite), envoie son intent
+   et affiche les snapshots. Match au meilleur des 5 (premier à 3 manches). */
+const BUILD = 'maximus-net-1';
+const SNAP_HZ = 30;
+const INTERP_MS = 100;   // rendu de l'adversaire ~100 ms dans le passé (interpolation)
+let netSnapAccum = 0;
+function perfNow(){ return (typeof performance!=='undefined' && performance.now) ? performance.now() : Date.now(); }
+
+function clearEdges(it){ it.jump=it.attack=it.attackAlt=it.dodge=it.roll=it.throw=it.ulti=false; }
+function localFighter(){ return (game.online && Net.role==='guest') ? player2 : player; }
+function wkey(w){ if(w===FISTS) return 'FISTS'; for(const k in WEAPONS) if(WEAPONS[k]===w) return k; return null; }
+function wfromkey(k){ return k==='FISTS' ? FISTS : (WEAPONS[k]||null); }
+function onlineMyCfg(){
+  return { classe:(saveData.onlineClass||'bouclier'),
+           name:((Net.role==='host'?(saveData.name||'Hôte'):'Invité')).slice(0,12),
+           look:(Net.role==='host'?saveData.look:(saveData.look2||saveData.look)) };
+}
+
+function startOnline(cfg){
+  if(!run) run=newRun('EN LIGNE');
+  run.seed=cfg.seed|0; run.level=15;
+  run.equip=Object.assign({}, EQUIP_ZERO, {casque:3,cuirasse:3,vitesse:2,bouclier:3,arme:2});
+  run.dura={casque:duraMax(3),cuirasse:duraMax(3)}; run.ulti=false; run.flawless=false;
+  const armes={bouclier:'gladius',deuxmains:'spathaL',double:'gladii'};
+  const localSide=(Net.role==='host')?'p1':'p2';
+  const mk=(x,facing,c,side)=>{
+    const cl=(c&&c.classe)||'bouclier', wgt=cl==='double'?0:(cl==='deuxmains'?2:1);
+    const f=new Fighter(x,facing,armes[cl]||'gladius',{
+      hp:150,stam:115,speed:230,dmgMult:1.15,armorFlat:3,dmgTakenMult:.95,
+      shieldMax:110,jumpV:[645,560,505][wgt],jumpCost:[7,8,10][wgt],
+      rollCost:[20,24,30][wgt],dashCost:[10,12,15][wgt],rollBoost:1.05,dashBoost:1.05,
+      atkSpd:.93,stunCh:.05,riposte:cl==='bouclier'?.2:0,
+      player:true,hue:(c&&c.hue)||0,classe:cl,name:(c&&c.name)||'?',look:c&&c.look});
+    f.padIdx=null; f.startX=x; f.startFacing=facing; f.startWeaponKey=armes[cl]||'gladius';
+    f.inputSrc=(side===localSide)?'local':'remote';
+    return f;
+  };
+  player = mk(240,1,cfg.p1,'p1');
+  player2 = mk(720,-1,cfg.p2,'p2');
+  enemy=player2; enemy2=null;
+  shieldDrops=[]; spears=[]; spearDrops=[]; traps=[]; trapTimer=trapDelay()+2;
+  game.floaters=[]; game.particles=[]; game.koTimer=0; game.vsWinner=null;
+  game.online=true; game.mode='versus'; game.onlineCfg=cfg;
+  game.rounds={p1:0,p2:0}; game.roundNo=1; game.matchOver=false; game.roundOver=false;
+  game.matchWinnerSide=null; game.pointAwarded=false; game.rematchMe=false; game.rematchPeer=false;
+  netSnapAccum=0; game.snapBuf=null; game.snapHist=[]; game.interRound=0;
+  game.screen='fight'; game.msg='EN LIGNE — manche 1 / 5'; game.msgT=2.2;
+}
+
+function onlineResetRound(){
+  for(const f of [player,player2]){
+    f.hp=f.maxHp; f.stam=f.maxStam; f.x=f.startX; f.y=0; f.vy=0; f.vx=0; f.facing=f.startFacing;
+    f.state='idle'; f.t=0; f.dead=false; f.blocking=false; f.crouch=false; f.thrown=false;
+    f.koRot=0; f.flash=0; f.counterT=0; f.ultiT=0; f.ultiNext=false; f.enraged=false;
+    f.st={slow:0,stun:0,blind:0,bleedT:0,bleedDps:0,regenT:0,regenPs:0};
+    f.weaponKey=f.startWeaponKey; f.w=WEAPONS[f.startWeaponKey]; f.aw=f.w;
+    f.shield={has:f.classe==='bouclier', broken:false, max:110, hp:110};
+    f.intent=mkIntent();
+    f.dura={casque:duraMax(3),cuirasse:duraMax(3)};
+  }
+  spears=[]; spearDrops=[]; shieldDrops=[]; game.floaters=[]; game.koTimer=0; game.roundOver=false;
+}
+
+function onlineAwardPoint(){
+  if(game.pointAwarded) return; game.pointAwarded=true;
+  const meSide=(Net.role==='host')?'p1':'p2';
+  const winSide=(game.rounds.p1>=3)?'p1':'p2';
+  if(winSide===meSide){ saveData.onlineScore=(saveData.onlineScore||0)+1; try{persist();}catch(e){} }
+}
+
+function onlineHostPostUpdate(dt){
+  if(game.matchOver || game.roundOver) return;
+  if(player.dead || player2.dead){
+    game.koTimer+=dt;
+    if(game.koTimer>1.6){
+      game.roundOver=true;
+      let w=null;
+      if(player.dead && !player2.dead) w='p2';
+      else if(player2.dead && !player.dead) w='p1';
+      if(w) game.rounds[w]++;
+      if(game.rounds.p1>=3 || game.rounds.p2>=3){
+        game.matchOver=true;
+        game.matchWinnerSide=(game.rounds.p1>=3)?'p1':'p2';
+        onlineAwardPoint();
+        Net.send(makeSnap());
+        game.screen='onlineEnd';
+      } else {
+        game.roundNo++;
+        game.interRound=1.8;   // entracte avant la manche suivante
+      }
+    }
+  }
+}
+
+function onlineSeparate(){
+  const A=player,B=player2;
+  if(A.state==='roll'||B.state==='roll') return;
+  if(!A.dead&&!B.dead){ const dx=B.x-A.x;
+    if(Math.abs(dx)<42 && Math.abs(B.y-A.y)<50){ const push=(42-Math.abs(dx))/2*Math.sign(dx||1); B.x+=push; A.x-=push; } }
+}
+
+function onlineFrame(dt){
+  game.msgT-=dt;
+  if(Net.role==='guest'){ onlineGuestFrame(dt); return; }
+  // HÔTE : simulation autoritaire
+  if(game.interRound>0){
+    game.interRound-=dt;
+    if(game.interRound<=0){ game.interRound=0; onlineResetRound(); game.msg='Manche '+game.roundNo+' / 5'; game.msgT=1.6; }
+  } else {
+    player.update(dt, player2, [player2]);
+    player2.update(dt, player, [player]);
+    onlineSeparate();
+    for(let i=shieldDrops.length-1;i>=0;i--){ const d=shieldDrops[i],o=d.owner;
+      if(o && !o.dead && o.shield && !o.shield.has && !o.shield.broken && Math.abs(o.x-d.x)<36 && o.y>-12){
+        o.shield.has=true; shieldDrops.splice(i,1); addFloater(o.x,GROUND-160,'bouclier récupéré !','#7ee787'); sfx.pick(); } }
+    updateSpears(dt);
+    updateTraps(dt);
+    onlineHostPostUpdate(dt);
+  }
+  netSnapAccum+=dt;
+  if(netSnapAccum>=1/SNAP_HZ){ netSnapAccum=0; Net.send(makeSnap()); }
+}
+
+function onlineGuestFrame(dt){
+  const me=player2, foe=player;
+  // 1. entrées locales -> envoi à l'hôte (avant la prédiction, pour ne rien perdre)
+  if(me){ fillHumanIntent(me); Net.send({t:'in', i:me.intent}); }
+  // 2. PRÉDICTION : on simule localement son propre combattant (réactivité immédiate)
+  if(me && !me.dead && !(game.interRound>0)) me.update(dt, foe, [foe]);
+  else if(me) clearEdges(me.intent);
+  // 3. INTERPOLATION : l'adversaire est affiché ~100 ms dans le passé, lissé
+  interpRemote(foe);
+  // 4. RÉCONCILIATION + méta : l'autorité (dernier snapshot) corrige PV/état/position
+  const latest=game.snapBuf;
+  if(latest){ reconcileSelf(me, latest.b); applySnapMeta(latest); }
+}
+// place l'adversaire (combattant p1 = distant) par interpolation entre deux snapshots
+function interpRemote(f){
+  const h=game.snapHist;
+  if(!f || !h || !h.length) return;
+  if(h.length<2){ applSnap(f, h[h.length-1].s.a); return; }
+  const rt=perfNow()-INTERP_MS;
+  if(rt>=h[h.length-1].time){ applSnap(f, h[h.length-1].s.a); return; }
+  let i=h.length-1; while(i>0 && h[i-1].time>rt) i--;
+  const s0=h[Math.max(0,i-1)], s1=h[i];
+  const span=(s1.time-s0.time)||1, a=Math.min(1,Math.max(0,(rt-s0.time)/span));
+  applSnap(f, s1.s.a);                       // champs discrets = snapshot le plus récent du couple
+  f.x = s0.s.a.x + (s1.s.a.x - s0.s.a.x)*a;  // position lissée
+  f.y = s0.s.a.y + (s1.s.a.y - s0.s.a.y)*a;
+}
+// corrige son propre combattant vers l'autorité sans casser la réactivité
+function reconcileSelf(me, s){
+  if(!me || !s) return;
+  me.hp=s.hp; me.stam=s.stam;
+  if(s.sh && me.shield){ me.shield.has=s.sh.has; me.shield.broken=s.sh.broken; me.shield.hp=s.sh.hp; }
+  if(s.st) me.st=s.st;
+  const interrupted = s.d || s.s==='hit' || (s.st && s.st.stun>0);
+  if(interrupted){
+    // l'autorité m'a interrompu (touché / étourdi / mort) : on adopte son état
+    me.dead=s.d; me.state=s.s; me.t=s.t; me.attackPhase=s.ph; me.attackType=s.at;
+    me.x=s.x; me.y=s.y; me.vx=s.vx; me.facing=s.facing; me.koRot=s.kr; me.flash=s.fl;
+  } else {
+    // correction douce de la dérive de position
+    const err=s.x-me.x;
+    if(Math.abs(err)>60) me.x=s.x; else me.x += err*0.2;
+  }
+}
+// applique l'état NON combattant du snapshot (lances, floaters, score, fin de match)
+function applySnapMeta(snap){
+  spears=(snap.sp||[]).map(s=>({x:s.x,y:s.y,vx:s.vx,vy:s.vy,spin:s.spin,type:s.type,w:wfromkey(s.wk),owner:null,mult:1}));
+  traps=(snap.tr||[]).map(o=>({type:o.ty,x:o.x,t:o.t,phase:o.ph,side:o.sd,stone:o.st,hit:new Set()}));
+  game.floaters=(snap.fo||[]).map(f=>({x:f.x,y:f.y,txt:f.txt,color:f.c,t:f.t}));
+  game.shake=snap.shk||0; game.roundNo=snap.rn; game.rounds=snap.rs||game.rounds; game.koTimer=snap.ko||0; game.interRound=snap.ir||0;
+  if(snap.mo && !game.matchOver){
+    game.matchOver=true;
+    game.matchWinnerSide=(game.rounds.p1>=3)?'p1':'p2';
+    onlineAwardPoint();
+    game.screen='onlineEnd';
+  }
+}
+
+function fSnap(f){ return {
+  x:f.x,y:f.y,vx:f.vx,facing:f.facing,hp:f.hp,stam:f.stam,
+  sh:f.shield?{has:f.shield.has,broken:f.shield.broken,hp:f.shield.hp}:null,
+  s:f.state,t:f.t,ph:f.attackPhase,at:f.attackType,bl:f.blocking,cr:f.crouch,
+  d:f.dead,kr:f.koRot,rd:f.rollDir,fl:f.flash,ct:f.counterT,ut:f.ultiT,un:f.ultiNext,
+  en:f.enraged,of:f.offhand,wt:f.walkT,st:f.st,wk:f.weaponKey,thr:f.thrown }; }
+function makeSnap(){ return { t:'snap',
+  a:fSnap(player), b:fSnap(player2),
+  sp:spears.map(s=>({x:s.x,y:s.y,vx:s.vx,vy:s.vy,spin:s.spin,type:s.type,wk:wkey(s.w)})),
+  tr:(traps||[]).map(o=>({ty:o.type,x:o.x,t:o.t,ph:o.phase,sd:o.side,st:o.stone})),
+  fo:game.floaters.map(f=>({x:f.x,y:f.y,txt:f.txt,c:f.color,t:f.t})),
+  shk:game.shake, rn:game.roundNo, rs:game.rounds, mo:game.matchOver, ko:game.koTimer, ir:game.interRound||0 }; }
+function applSnap(f,s){
+  if(!f||!s) return;
+  f.x=s.x;f.y=s.y;f.vx=s.vx;f.facing=s.facing;f.hp=s.hp;f.stam=s.stam;
+  if(s.sh&&f.shield){ f.shield.has=s.sh.has; f.shield.broken=s.sh.broken; f.shield.hp=s.sh.hp; }
+  f.state=s.s;f.t=s.t;f.attackPhase=s.ph;f.attackType=s.at;f.blocking=s.bl;f.crouch=s.cr;
+  f.dead=s.d;f.koRot=s.kr;f.rollDir=s.rd;f.flash=s.fl;f.counterT=s.ct;f.ultiT=s.ut;f.ultiNext=s.un;
+  f.enraged=s.en;f.offhand=s.of;f.walkT=s.wt; if(s.st) f.st=s.st;
+  f.weaponKey=s.wk; f.thrown=s.thr; f.w=s.thr?FISTS:(WEAPONS[s.wk]||f.w); f.aw=f.w;
+}
+function applySnap(snap){
+  applSnap(player, snap.a); applSnap(player2, snap.b);
+  spears=(snap.sp||[]).map(s=>({x:s.x,y:s.y,vx:s.vx,vy:s.vy,spin:s.spin,type:s.type,w:wfromkey(s.wk),owner:null,mult:1}));
+  game.floaters=(snap.fo||[]).map(f=>({x:f.x,y:f.y,txt:f.txt,color:f.c,t:f.t}));
+  game.shake=snap.shk||0; game.roundNo=snap.rn; game.rounds=snap.rs||game.rounds; game.koTimer=snap.ko||0;
+  if(snap.mo && !game.matchOver){
+    game.matchOver=true;
+    game.matchWinnerSide=(game.rounds.p1>=3)?'p1':'p2';
+    onlineAwardPoint();
+    game.screen='onlineEnd';
+  }
+}
+
+function onlineRequestRematch(){ if(game.rematchMe) return; game.rematchMe=true; Net.send({t:'rematch'}); onlineTryRematch(); }
+function onlineTryRematch(){
+  if(game.rematchMe && game.rematchPeer && Net.role==='host'){
+    const cfg=Object.assign({}, game.onlineCfg, {seed:(Math.random()*1e9)|0});
+    Net.send({t:'start', cfg}); startOnline(cfg);
+  }
+}
+function onlineQuit(){ Net.leave(); game.online=false; game.mode='solo'; player2=null; game.screen='title'; }
+
+function onlineOnReady(){
+  if(Net.role==='guest') Net.send({t:'hello', build:BUILD, cfg:onlineMyCfg()});
+}
+function onlineOnData(m){
+  switch(m.t){
+    case 'hello':
+      if(Net.role!=='host') return;
+      if(m.build!==BUILD){ Net.send({t:'bye', reason:'version'}); game.netError='versions différentes'; return; }
+      { const cfg={ seed:(Math.random()*1e9)|0,
+                    p1:Object.assign({hue:210}, onlineMyCfg()),
+                    p2:Object.assign({hue:0}, m.cfg) };
+        Net.send({t:'start', cfg}); startOnline(cfg); }
+      break;
+    case 'start':
+      if(Net.role!=='guest') return;
+      startOnline(m.cfg);
+      break;
+    case 'in':
+      if(Net.role==='host' && player2){ const it=m.i||{};
+        player2.intent.move=it.move||0; player2.intent.crouch=!!it.crouch;
+        player2.intent.block=!!it.block; player2.intent.aimDir=it.aimDir||0;
+        for(const k of ['jump','attack','attackAlt','dodge','roll','throw','ulti']) if(it[k]) player2.intent[k]=true;
+      }
+      break;
+    case 'snap':
+      if(Net.role==='guest'){ game.snapBuf=m; if(!game.snapHist) game.snapHist=[]; game.snapHist.push({time:perfNow(), s:m}); if(game.snapHist.length>16) game.snapHist.shift(); }
+      break;
+    case 'rematch':
+      game.rematchPeer=true; onlineTryRematch();
+      break;
+    case 'bye':
+      game.netError=(m.reason==='version')?'versions différentes':'adversaire parti';
+      game.online=false; if(game.screen==='fight'||game.screen==='onlineEnd') game.screen='onlineMenu';
+      break;
+  }
+}
+function onlinePeerLeft(){
+  if(game.online || game.screen==='onlineHost'){
+    game.netError='adversaire déconnecté';
+    if(game.screen==='fight'||game.screen==='onlineEnd'){ game.online=false; game.screen='onlineMenu'; }
+  }
+}
+
+function drawInterRound(){
+  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,0,W,H);
+  const cfg=game.onlineCfg||{p1:{name:'J1'},p2:{name:'J2'}};
+  title('MANCHE '+game.roundNo+' / 5', 214, 40, '#f5c542');
+  title((cfg.p1.name||'J1')+'   '+(game.rounds?game.rounds.p1:0)+'  —  '+(game.rounds?game.rounds.p2:0)+'   '+(cfg.p2.name||'J2'), 266, 24, '#ffe9a0');
+}
+function drawOnlineEnd(t){
+  drawArena(t); overlay(.62); game.cards=[];
+  const meSide=(Net.role==='host')?'p1':'p2';
+  const won=game.matchWinnerSide===meSide;
+  title(won?'VICTOIRE !':'DÉFAITE', 150, 48, won?'#7ee787':'#ff6b6b');
+  title('Manches   '+(game.rounds?game.rounds.p1:0)+'  —  '+(game.rounds?game.rounds.p2:0), 208, 24, '#f0d9a0');
+  title('Ton score en ligne : '+(saveData.onlineScore||0), 246, 16, '#8ad7ff');
+  const bx=W/2-140;
+  const label=game.rematchMe?(game.rematchPeer?'PRÊTS !':'EN ATTENTE DE L’ADVERSAIRE…'):'REVANCHE';
+  card(bx,300,280,48, hover(bx,300,280,48));
+  title(label, 330, 16, '#fff');
+  game.cards.push({x:bx,y:300,w:280,h:48,action:onlineRequestRematch});
+  card(bx,360,280,46, hover(bx,360,280,46));
+  title('QUITTER', 389, 16, '#ddd');
+  game.cards.push({x:bx,y:360,w:280,h:46,action:onlineQuit});
+}
+Net.onReady=onlineOnReady; Net.onData=onlineOnData; Net.onPeerLeft=onlinePeerLeft;
+
 function drawMode(t){
   drawArena(t); overlay(.62); game.cards=[];
   backBtn(()=>{ game.screen='title'; });
@@ -2310,22 +2669,100 @@ function drawMode(t){
   const defs=[
     ['SOLO', 'La lignée roguelike : '+MAX_LEVEL+' combats, une seule vie.', '#fff',
       ()=>{ game.mode='solo'; game.coopOn=false; player2=null; game.nameInput=saveData.name||'Maximus'; game.screen='nom'; }],
-    ['DUEL LOCAL — 1 contre 1', 'Joueur 1 au clavier vs Joueur 2 à la manette — ou une manette par joueur.', '#ff9c9c',
+    ['DUEL LOCAL — 1 contre 1', 'Joueur 1 (clavier & souris) contre Joueur 2 (manette).', '#ff9c9c',
       ()=>{ game.mode='versus'; game.screen='vsSetup'; }],
-    ['DUO contre l’IA', 'La lignée à deux vs l’IA : J2 à la manette — ou une manette par joueur.', '#7ee787',
+    ['DUO contre l’IA', 'La lignée à deux : J2 à la manette — toujours 2 adversaires en face.', '#7ee787',
       ()=>{ game.mode='coop'; game.coopOn=true; player2=null; game.nameInput=saveData.name||'Maximus'; game.screen='nom'; }],
+    ['EN LIGNE — 1 contre 1', 'Affronte un ami à distance via un code de salon.', '#8ad7ff',
+      ()=>{ Net.leave(); game.screen='onlineMenu'; }],
   ];
   defs.forEach((d,i)=>{
-    const x=W/2-260, y=150+i*96, w=520, hh=78;
+    const x=W/2-260, y=132+i*82, w=520, hh=68;
     card(x,y,w,hh, hover(x,y,w,hh));
-    title(d[0], y+32, 22, d[2]);
-    title(d[1], y+58, 14, '#ccc');
+    title(d[0], y+29, 21, d[2]);
+    title(d[1], y+52, 13, '#ccc');
     game.cards.push({x,y,w,h:hh,action:d[3]});
   });
   if(!padList().length)
-    title('Branche une manette pour J2 — ou deux manettes pour jouer chacun la sienne.', 470, 14, '#999');
+    title('Branche une manette Xbox pour les modes locaux à deux joueurs.', 486, 14, '#999');
   else
-    title('Manette détectée ✓', 470, 14, '#7ee787');
+    title('Manette détectée ✓', 486, 14, '#7ee787');
+}
+function drawOnlineMenu(t){
+  drawArena(t); overlay(.62); game.cards=[];
+  backBtn(()=>{ Net.leave(); game.screen='mode'; });
+  title('JOUER EN LIGNE', 82, 32, '#f5c542');
+  title('1 contre 1 à distance — premier à 3 manches gagnantes.', 118, 15, '#ccc');
+  // --- sélecteur de classe (transmis à l'adversaire dans le handshake) ---
+  title('Ta classe', 156, 16, '#ffe9a0');
+  const noms={bouclier:'Murmillo', deuxmains:'Secutor lourd', double:'Dimachaerus'};
+  const cur=saveData.onlineClass||'bouclier';
+  Object.keys(CLASSES).forEach((k,i)=>{
+    const w=196, gap=14, x=W/2-(3*w+2*gap)/2+i*(w+gap), y=176, hh=58;
+    const sel=cur===k;
+    card(x,y,w,hh, sel||hover(x,y,w,hh));
+    fitText(noms[k], x+w/2, y+35, w-18, 18, sel?'#ffe9a0':'#ddd', true);
+    game.cards.push({x,y,w,h:hh,action:()=>{ saveData.onlineClass=k; try{persist();}catch(e){} }});
+  });
+  const defs=[
+    ['HÉBERGER', 'Crée un salon et communique le code à ton adversaire.', '#8ad7ff',
+      ()=>{ game.codeInput=''; Net.host(); game.screen='onlineHost'; }],
+    ['REJOINDRE', 'Entre le code du salon reçu de ton adversaire.', '#7ee787',
+      ()=>{ Net.leave(); game.codeInput=''; game.screen='onlineJoin'; }],
+  ];
+  defs.forEach((d,i)=>{
+    const x=W/2-240, y=272+i*96, w=480, hh=80;
+    card(x,y,w,hh, hover(x,y,w,hh));
+    title(d[0], y+32, 23, d[2]);
+    title(d[1], y+58, 14, '#ccc');
+    game.cards.push({x,y,w,h:hh,action:d[3]});
+  });
+}
+function drawOnlineHost(t){
+  drawArena(t); overlay(.62); game.cards=[];
+  backBtn(()=>{ Net.leave(); game.screen='onlineMenu'; });
+  title('HÉBERGER', 96, 32, '#f5c542');
+  if(Net.status==='error'){
+    title('Connexion impossible', 214, 22, '#ff6b6b');
+    title(Net.error||'', 252, 15, '#ffb3b3');
+    title('Lance le serveur puis réessaie : node dev/net/relay.js', 300, 14, '#ccc');
+  } else if(Net.status==='ready'){
+    title('Adversaire connecté ✓', 232, 26, '#7ee787');
+    title('Le combat démarrera ici (étape 3).', 282, 15, '#ccc');
+  } else if(!Net.code){
+    title('Connexion au serveur…', 250, 20, '#ffe9a0');
+  } else {
+    title('Communique ce code à ton adversaire :', 198, 17, '#ffe9a0');
+    const bw=300, bx=W/2-bw/2, by=232;
+    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.strokeStyle='#f5c542'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.roundRect(bx,by,bw,58,8); ctx.fill(); ctx.stroke();
+    ctx.textAlign='center'; ctx.font='bold 34px Georgia'; ctx.fillStyle='#fff';
+    ctx.fillText(Net.code, W/2, by+40);
+    title('En attente de l’adversaire…', by+92, 17, '#8ad7ff');
+  }
+}
+function drawOnlineJoin(t){
+  drawArena(t); overlay(.62); game.cards=[];
+  backBtn(()=>{ Net.leave(); game.screen='onlineMenu'; });
+  title('REJOINDRE', 96, 32, '#f5c542');
+  if(Net.status==='ready'){
+    title('Connecté ✓', 232, 26, '#7ee787');
+    title('Le combat démarrera ici (étape 3).', 282, 15, '#ccc');
+    return;
+  }
+  const bx=W/2-180, by=196;
+  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.strokeStyle='#f5c542'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.roundRect(bx,by,360,50,6); ctx.fill(); ctx.stroke();
+  ctx.textAlign='center'; ctx.font='bold 28px Georgia'; ctx.fillStyle='#fff';
+  const curs=Math.sin(t*6)>0?'|':'';
+  ctx.fillText((game.codeInput||'')+curs, W/2, by+34);
+  title('Tape le code du salon (ex. MAX-AB12) puis ENTRÉE', by+78, 15, '#ffe9a0');
+  if(Net.status==='connecting') title('Connexion…', by+104, 15, '#8ad7ff');
+  else if(Net.status==='error') title(Net.error||'erreur', by+104, 15, '#ff6b6b');
+  const vx=W/2-110, vy=by+126;
+  card(vx,vy,220,44, hover(vx,vy,220,44));
+  title('REJOINDRE', vy+28, 17, '#fff');
+  game.cards.push({x:vx,y:vy,w:220,h:44,action:onlineDoJoin});
 }
 function drawVsSetup(t){
   drawArena(t); overlay(.62); game.cards=[];
@@ -2333,7 +2770,7 @@ function drawVsSetup(t){
   title('DUEL LOCAL', 76, 32, '#f5c542');
   const noms={bouclier:'Murmillo', deuxmains:'Secutor lourd', double:'Dimachaerus'};
   const côtés=[
-    ['JOUEUR 1 — clavier / manette', '#9fd8ff', 'vsP1', 120],
+    ['JOUEUR 1 — clavier & souris', '#9fd8ff', 'vsP1', 120],
     ['JOUEUR 2 — manette', '#ff9c9c', 'vsP2', 520],
   ];
   for(const [titre, col, champ, x0] of côtés){
@@ -2358,7 +2795,7 @@ function drawVsSetup(t){
   card(bx,by,260,48, ok&&hover(bx,by,260,48));
   title(ok?'COMBATTRE !':'MANETTE REQUISE', by+31, 17, ok?'#fff':'#886');
   if(ok) game.cards.push({x:bx,y:by,w:260,h:48,action:startVersus});
-  title('Arène II · pièges actifs · mêmes armes de référence  ·  deux manettes = une par joueur', 486, 13, '#999');
+  title('Arène II · pièges actifs · mêmes armes de référence pour les deux camps', 486, 13, '#999');
 }
 function startVersus(){
   if(!run) run=newRun('DUEL');
@@ -2378,9 +2815,8 @@ function startVersus(){
     f.padIdx=pad;
     return f;
   };
-  const deuxPads = padList().length>=2;   // deux manettes : une par joueur
-  player  = mk(240, 1, game.vsP1, 210, 'JOUEUR 1', deuxPads?0:null, saveData.look);
-  player2 = mk(720,-1, game.vsP2, 0,   'JOUEUR 2', deuxPads?1:0,    saveData.look2);
+  player  = mk(240, 1, game.vsP1, 210, 'JOUEUR 1', null, saveData.look);
+  player2 = mk(720,-1, game.vsP2, 0,   'JOUEUR 2', 0,    saveData.look2);
   enemy = player2; enemy2 = null;   // la boucle 1c1 réutilise l'adversaire humain
   shieldDrops=[]; spears=[]; spearDrops=[]; traps=[]; trapTimer=trapDelay()+2;
   game.floaters=[]; game.particles=[]; game.koTimer=0; game.vsWinner=null;
@@ -2402,9 +2838,7 @@ function drawCoopJoin(t){
   backBtn(()=>{ game.screen='couleur'; });
   title('JOUEUR 2 — MANETTE', 84, 30, '#f5c542');
   const ok = padList().length>0;
-  title(padList().length>=2 ? 'Deux manettes ✓ — une par joueur, choisis la classe du J2'
-        : (ok ? 'Manette détectée ✓ — clavier J1 + manette J2, choisis la classe du J2'
-              : 'Branche une manette Xbox...'), 122, 15, ok?'#7ee787':'#ff9c9c');
+  title(ok ? 'Manette détectée ✓ — choisis la classe du Joueur 2' : 'Branche une manette Xbox...', 122, 15, ok?'#7ee787':'#ff9c9c');
   const noms={bouclier:'Murmillo', deuxmains:'Secutor lourd', double:'Dimachaerus'};
   Object.keys(CLASSES).forEach((k,i)=>{
     const x=W/2-160, y=150+i*74, w=320, hh=64;
@@ -2468,6 +2902,8 @@ function drawClasse(t){
     fitText(c.nom, x+cw/2, y+38, cw-24, 22, '#ffe9a0', true);
     fitText('— '+c.sub+' —', x+cw/2, y+62, cw-24, 14, '#bbb');
     c.desc.forEach((l,j)=>fitText(l, x+cw/2, y+95+j*22, cw-20, 13, '#ddd'));
+    const t0=Object.keys(TREES[k]).slice(0,3).map(w=>WEAPONS[w].nom).join(', ');
+    fitText('Premières armes : '+t0+'...', x+cw/2, y+h-18, cw-16, 12, '#9fd8ff');
     game.cards.push({x,y,w:cw,h,action:()=>{
       run.classe=k; run.weapon=Object.keys(TREES[k])[0];
       saveData.run=run; persist(); game.screen='couleur';
@@ -2507,8 +2943,7 @@ function drawCouleur(t){
 
 /* ============ PERSONNALISATION DU PHYSIQUE ============
    Cible 'p1' (lignée / Joueur 1) ou 'p2' (Joueur 2 manette).
-   Modifiable uniquement au lancement d'une partie (écran couleur / écrans multi) ;
-   le look choisi est conservé pour les parties suivantes via saveData.look. */
+   Accessible à la création, entre les combats, et depuis les écrans multi. */
 function persoLook(){
   if(game.persoTarget==='p2') return saveData.look2;
   if(run && run.look) return run.look;
@@ -2617,21 +3052,10 @@ function drawSelect(t){
     card(x,y,cw,150,sel);
     fitText(wp.nom, x+cw/2, y+22, cw-12, 15, sel?'#ffe9a0':'#ddd', true);
     drawWeaponIcon(k, x+cw/2, y+66, 62);
-    if(wp.throwType){ // icône « lançable » : petit javelot en vol
-      const ix=x+cw-16, iy=y+16, ir=11;
-      ctx.save();
-      ctx.fillStyle='#f5c542'; ctx.strokeStyle='#241a08'; ctx.lineWidth=1.5;
-      ctx.beginPath(); ctx.arc(ix,iy,ir,0,7); ctx.fill(); ctx.stroke();
-      ctx.strokeStyle='#241a08'; ctx.lineCap='round'; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.moveTo(ix-5,iy+5); ctx.lineTo(ix+4,iy-4); ctx.stroke();   // hampe
-      ctx.beginPath();                                                                // pointe
-      ctx.moveTo(ix+4,iy-4); ctx.lineTo(ix+0,iy-4);
-      ctx.moveTo(ix+4,iy-4); ctx.lineTo(ix+4,iy-0); ctx.stroke();
-      ctx.lineWidth=1.2;                                                              // lignes de vitesse
-      ctx.beginPath();
-      ctx.moveTo(ix-6,iy+0); ctx.lineTo(ix-2,iy+0);
-      ctx.moveTo(ix-6,iy+3); ctx.lineTo(ix-3,iy+3); ctx.stroke();
-      ctx.restore();
+    if(wp.throwType){ // badge « lançable » dans le coin
+      ctx.fillStyle='#f5c542'; ctx.beginPath(); ctx.arc(x+cw-15,y+16,9,0,7); ctx.fill();
+      ctx.fillStyle='#241a08'; ctx.font='bold 11px Georgia'; ctx.textAlign='center';
+      ctx.fillText('➤', x+cw-15, y+20);
     }
     fitText(wp.dmg+' dég  ·  '+wp.range+' por.', x+cw/2, y+112, cw-10, 12, '#ccc');
     const spd=wp.windup<=250?'rapide':(wp.windup<=400?'moyenne':'lente');
@@ -2647,17 +3071,22 @@ function drawSelect(t){
     game.cards.push({x,y,w:cw,h:150,action:()=>{run.weapon=k; saveData.run=run; persist(); startFight();}});
   });
   // une seule ligne discrète : prochaine arme à débloquer
-  title('Javelot doré = arme lançable ('+bindLabel('throw')+' / '+padBtnName(padBinds.throw)+', endurance pleine requise)   —   les autres ne se lancent pas', 330, 12, '#b9a97e');
+  title('➤ = se lance ('+bindLabel('throw')+' / '+padBtnName(padBinds.throw)+', endurance pleine requise)   —   les autres ne se lancent pas', 330, 12, '#b9a97e');
   const tr=tree(), locked=Object.keys(tr).filter(k=>tr[k]>run.wins);
   if(locked.length)
     title('Prochaine arme : '+WEAPONS[locked[0]].nom+' ('+tr[locked[0]]+'ᵉ victoire)', 352, 13, '#8f8574');
   // or + accès boutique / compétences (coin droit)
   title2('◉ '+run.gold+' or', W-118, 40, 17, '#ffd700');
-  const sbx=W-204, sby=52;   // aligné en colonne avec COMPÉTENCES (statsBtn)
-  card(sbx,sby,180,34, hover(sbx,sby,180,34));
-  title2('BOUTIQUE', sbx+90, sby+23, 14, '#ffe9a0');
-  game.cards.push({x:sbx,y:sby,w:180,h:34,action:()=>{game.shopReturn='select'; game.screen='boutique';}});
+  const sbx=W-230, sby=52;
+  card(sbx,sby,160,34, hover(sbx,sby,160,34));
+  title2('BOUTIQUE', sbx+80, sby+23, 14, '#ffe9a0');
+  game.cards.push({x:sbx,y:sby,w:160,h:34,action:()=>{game.shopReturn='select'; game.screen='boutique';}});
   statsBtn('select');
+  // physique modifiable entre les combats
+  const abx=W-204, aby=138;
+  card(abx,aby,180,34, hover(abx,aby,180,34));
+  title2('APPARENCE', abx+90, aby+22, 13, '#ffb98a');
+  game.cards.push({x:abx,y:aby,w:180,h:34,action:()=>{game.persoTarget='p1'; game.persoFrom='select'; game.screen='perso';}});
   title('Clique sur une arme pour lancer le combat', 440, 18, Math.sin(t*4)>0?'#fff':'#f5c542');
 }
 function drawVictory(t){
@@ -3027,7 +3456,8 @@ function frame(now){
   updatePads();
   if(game.slowmo>0){ game.slowmo-=dt; dt*=.35; }
 
-  if(game.screen==='fight' && !game.paused){
+  if(game.screen==='fight' && !game.paused && game.online){ onlineFrame(dt); }
+  else if(game.screen==='fight' && !game.paused){
     game.msgT-=dt;
     if(game.mode==='versus'){
       // duel local : les deux joueurs se combattent
@@ -3094,6 +3524,10 @@ function frame(now){
   const S=game.screen;
   if(S==='title') drawTitle(t);
   else if(S==='mode') drawMode(t);
+  else if(S==='onlineMenu') drawOnlineMenu(t);
+  else if(S==='onlineHost') drawOnlineHost(t);
+  else if(S==='onlineJoin') drawOnlineJoin(t);
+  else if(S==='onlineEnd') drawOnlineEnd(t);
   else if(S==='vsSetup') drawVsSetup(t);
   else if(S==='vsEnd') drawVsEnd(t);
   else if(S==='coopJoin') drawCoopJoin(t);
@@ -3142,6 +3576,7 @@ function frame(now){
       ctx.fillRect(0,0,W,H);
     }
     drawHUD();
+    if(game.online && game.interRound>0) drawInterRound();
     if(S==='victory') drawVictory(t);
     else if(game.paused) drawPause(t);
     else game.cards=[];
