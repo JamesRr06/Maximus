@@ -54,14 +54,25 @@ En Python : `blocks = re.findall(r'<script>([\s\S]*?)</script>', html)` puis
 - **`/tmp` est volatil** : vidé entre sessions. Tout se reconstruit depuis
   `maximus.html` (code clair) + `dev/wrapper.c` + ce document. La musique se
   ré-extrait du bloc `__MUS` de `maximus.html`.
-- **git sur le montage** : `git init/commit` échoue dans le dossier. Construire le
-  dépôt dans `/tmp/repo` (env `HOME=/tmp GIT_CONFIG_NOSYSTEM=1`), puis recopier
-  le répertoire `.git` dans le dossier. Cloner depuis le `.git` existant pour
-  garder l'historique.
+- **NE JAMAIS toucher au `.git` du dossier depuis le sandbox** : il est en
+  lecture seule côté sandbox. Tenter de recopier/cloner un `.git` dans le dossier
+  échoue (`Operation not permitted`) et laisse des résidus (`.git/index.lock`,
+  `.git/.git`) qui bloquent ensuite le commit de l'utilisateur. Donc : **déployer
+  uniquement les fichiers construits** dans le dossier, vérifier par `cmp`, et
+  s'arrêter là. Ne pas faire `git add/commit/clone` sur le montage.
 - **Exe verrouillé** si le jeu est ouvert : déployer en `Maximus_new.exe`
   (déjà dans `.gitignore`), remplacer et nettoyer au coup suivant.
-- **L'utilisateur pousse lui-même** : préparer les commits, terminer par la
-  commande `git push` à lui donner. Ne jamais pousser à sa place.
+- **Fin d'itération = juste donner la commande git à l'utilisateur** (il pousse
+  toujours lui-même). Terminer chaque itération par ces lignes PowerShell, à
+  lancer dans le dossier du jeu :
+  ```powershell
+  git add maximus.html Maximus.exe
+  git commit -m "…"
+  git push
+  ```
+  Identité déjà réglée sur ce dépôt (`git config user.email "maximelei@yahoo.fr"`,
+  `user.name "JamesRr06"` — une seule fois si un jour elle manque). Ne jamais
+  pousser à sa place, ne rien committer depuis le sandbox.
 
 ## État du jeu (résumé)
 
