@@ -1,0 +1,12 @@
+# Blueprint Render pour le relais multijoueur de Maximus.
+# Déploiement en un clic : https://render.com → New → Blueprint → ce dépôt.
+# Voir le guide détaillé : dev/DEPLOIEMENT-ONLINE.md
+services:
+  - type: web
+    name: maximus-relay
+    runtime: node
+    plan: free
+    rootDir: dev/net
+    buildCommand: npm install
+    startCommand: node relay.js
+    healthCheckPath: /

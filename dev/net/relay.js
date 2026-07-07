@@ -23,6 +23,7 @@
  *     {t:'error', reason}        'bad-json' | 'no-room' | 'room-full' | 'not-in-room'
  */
 'use strict';
+const http = require('http');
 const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PORT, 10) || 8080;
@@ -63,9 +64,21 @@ function leaveRoom(ws){
   rooms.delete(code);
 }
 
-const wss = new WebSocketServer({ port: PORT });
+// Serveur HTTP minimal : sert de health-check pour l'hébergeur (Render, etc.)
+// et permet de « réveiller » le service en visitant l'URL dans un navigateur
+// avant de lancer une partie. Le WebSocket se greffe dessus (même port).
+const httpServer = http.createServer((req, res) => {
+  if (req.url === '/' || req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('MAXIMUS relay OK');
+  } else {
+    res.writeHead(404); res.end();
+  }
+});
 
-wss.on('listening', () => console.log(`[relais MAXIMUS] à l'écoute sur le port ${PORT}`));
+const wss = new WebSocketServer({ server: httpServer });
+
+httpServer.listen(PORT, () => console.log(`[relais MAXIMUS] à l'écoute sur le port ${PORT}`));
 
 wss.on('connection', (ws) => {
   ws.roomCode = null;
